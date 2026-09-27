@@ -1,0 +1,1 @@
+<section class="card"><h2>Pide un cambio</h2><p class="muted">Cuéntanos qué necesitas. Lo revisamos contigo.</p><form method="post" action="{% url 'request_create' business.public_id %}">{% csrf_token %}{{ form.as_p }}<button>Enviar petición</button></form></section>

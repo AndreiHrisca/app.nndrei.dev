@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<div class="card"><a class="brand" href="/">nndrei<span>.</span></a><h1>{{ title|default:'Recupera tu acceso' }}</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button>{{ button|default:'Continuar' }}</button></form></div>{% endblock %}

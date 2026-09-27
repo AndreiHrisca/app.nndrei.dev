@@ -1,0 +1,13 @@
+Django>=5.2.10,<5.3
+psycopg[binary]>=3.2,<4
+django-environ>=0.12,<1
+django-q2>=1.8,<2
+django-otp>=1.6,<2
+django-axes>=8,<9
+whitenoise>=6.9,<7
+gunicorn>=23,<24
+WeasyPrint>=66,<69
+requests>=2.32,<3
+qrcode>=8,<9
+pytest>=8,<10
+pytest-django>=4.11,<5

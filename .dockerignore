@@ -1,0 +1,10 @@
+.env
+.git
+.agents
+.codex
+__pycache__
+.pytest_cache
+private
+staticfiles
+*.sqlite3
+docs/screenshots
