@@ -12,7 +12,7 @@ Django 5.2, Python 3.12, PostgreSQL 16, HTMX y CSS propio. Interfaz en español 
 6. `docker compose run --rm web python manage.py setup_schedules`
 7. `docker compose up -d web worker`
 
-Conecta tu proxy al servicio `web:8000` dentro de la red de Compose. No hay puertos públicos en el Compose principal. Para probar en localhost: `docker compose -f compose.yaml -f compose.local.yaml up -d`. Abre http://localhost:8000. El primer acceso interno exige escanear el QR TOTP.
+Conecta tu proxy al servicio `web:8000` dentro de la red de Compose. No hay puertos públicos en el Compose principal. Para probar en localhost: `docker compose -f compose.yaml -f compose.local.yaml up -d`. Abre http://localhost:8000. El primer acceso de un administrador exige escanear el QR TOTP; la política por rol se cambia en `/admin/` (Políticas de verificación en dos pasos). Los clientes pueden entrar con un enlace al email, que envía el `worker`.
 
 Configura `SITE_URL`, `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS` para tu dominio. En producción con HTTPS activa las tres variables de seguridad de `.env.example`. El proxy debe sobrescribir `X-Forwarded-Proto`. Nunca publiques `/app/private` ni lo montes como estáticos. Haz copias de PostgreSQL y del volumen `private_data`.
 

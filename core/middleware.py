@@ -1,6 +1,5 @@
 import re
 from django.shortcuts import redirect
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
 # The client demo is public and ignores the session, so a half-signed-in user
 # opening a demo link sees the demo rather than the 2FA screen.
@@ -12,9 +11,10 @@ class TwoFactorMiddleware:
 
     def __call__(self, request):
         user = request.user
-        allowed = request.path in {'/2fa/', '/logout/', '/sw.js', '/manifest.webmanifest', '/offline/'} or request.path.startswith('/static/') or DEMO_PATH.match(request.path)
-        if user.is_authenticated and not allowed:
-            required = user.role != 'client' or TOTPDevice.objects.filter(user=user, confirmed=True).exists()
-            if required and not user.is_verified():
+        allowed = request.path in {'/2fa/', '/logout/', '/sw.js', '/manifest.webmanifest', '/offline/'} or request.path.startswith(('/static/', '/entrar/')) or DEMO_PATH.match(request.path)
+        if user.is_authenticated and not allowed and not user.is_verified():
+            # The role's policy (TwoFactorPolicy) decides; a remembered device counts as the second step.
+            from .security import second_step_required, verify_with_trusted_device
+            if second_step_required(user) and not verify_with_trusted_device(request):
                 return redirect('two_factor')
         return self.get_response(request)

@@ -128,10 +128,10 @@ def screens(demo):
     return {
         'admin': [('pipeline', '/'), ('buscar', '/buscar/'), ('clientes', '/clientes/'), ('ficha', f'/clientes/{b.public_id}/'),
                   ('propuestas', '/propuestas/'), ('propuesta', f'/propuestas/{p.public_id}/'), ('finanzas', '/finanzas/'),
-                  ('usuarios', '/usuarios/'), ('mas', '/mas/'), ('nuevo-lead', '/clientes/nuevo/')],
+                  ('usuarios', '/usuarios/'), ('mas', '/mas/'), ('nuevo-lead', '/clientes/nuevo/'), ('seguridad', '/seguridad/')],
         'developer': [('clientes', '/clientes/'), ('ficha', f'/clientes/{demo["businesses"][0].public_id}/')],
         'accountant': [('finanzas', '/finanzas/'), ('ficha', f'/clientes/{b.public_id}/')],
-        'client': [('portal', '/portal/'), ('peticiones', '/portal/peticiones/'), ('gastos', '/portal/gastos/'), ('documentos', '/portal/documentos/')],
+        'client': [('portal', '/portal/'), ('peticiones', '/portal/peticiones/'), ('gastos', '/portal/gastos/'), ('documentos', '/portal/documentos/'), ('seguridad', '/seguridad/')],
     }
 
 

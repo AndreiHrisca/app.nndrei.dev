@@ -527,4 +527,66 @@ class EmailOutbox(models.Model):
     sent_at=models.DateTimeField(null=True,blank=True)
     attempts=models.PositiveIntegerField(default=0)
     last_error=models.TextField(blank=True)
+    # Login links: sent from the queue (so the response takes the same time
+    # whether or not the email exists) and their URL is wiped once sent or expired.
+    sensitive_until=models.DateTimeField(null=True,blank=True)
 
+
+# --- Access: 2FA policy per role, remembered devices, email login links --------
+
+TWO_FACTOR_POLICIES = [('required', 'Obligatoria'), ('optional', 'Opcional'), ('disabled', 'Desactivada')]
+# Used when a role has no row yet. The app stores links to clients' credentials,
+# so admins must use a second step by default.
+DEFAULT_TWO_FACTOR = {'admin': 'required', 'developer': 'optional', 'accountant': 'optional', 'client': 'disabled'}
+
+
+class TwoFactorPolicy(models.Model):
+    role = models.CharField('Rol', max_length=20, choices=ROLES, unique=True)
+    policy = models.CharField('Verificación en dos pasos', max_length=10, choices=TWO_FACTOR_POLICIES)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Política de verificación en dos pasos'
+        verbose_name_plural = 'Políticas de verificación en dos pasos'
+
+    def __str__(self):
+        return f'{self.get_role_display()}: {self.get_policy_display()}'
+
+    @classmethod
+    def for_role(cls, role):
+        return cls.objects.filter(role=role).values_list('policy', flat=True).first() or DEFAULT_TWO_FACTOR.get(role, 'required')
+
+
+class OwnRecordQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        return self.filter(user=user) if user.is_authenticated else self.none()
+
+
+class TrustedDevice(PublicIdModel):
+    """A browser that skips the second step for a while. Only the token's hash is stored."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='trusted_devices')
+    token_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField('Dispositivo', max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    objects = OwnRecordQuerySet.as_manager()
+
+
+class LoginToken(models.Model):
+    """One-use email login link. Only the token's hash is stored."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='login_tokens')
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class LoginLinkRequest(models.Model):
+    """Every request for a link, known email or not, so the limits say nothing about who exists."""
+    email = models.EmailField()
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    objects = AdminRecordQuerySet.as_manager()

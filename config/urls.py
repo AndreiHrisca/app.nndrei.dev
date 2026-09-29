@@ -78,6 +78,16 @@ urlpatterns += [
     path('clientes/<uuid:public_id>/actualizar-google/', hours_views.business_google_refresh, name='business_google_refresh'),
 ]
 
+from core import security_views
+urlpatterns += [
+    path('seguridad/', security_views.security, name='security'),
+    path('seguridad/desactivar/', security_views.security_turn_off, name='security_turn_off'),
+    path('seguridad/dispositivos/<uuid:public_id>/olvidar/', security_views.device_revoke, name='device_revoke'),
+    path('seguridad/dispositivos/olvidar-todos/', security_views.device_revoke_all, name='device_revoke_all'),
+    path('entrar/enlace/', security_views.login_link, name='login_link'),
+    path('entrar/<str:token>/', security_views.login_link_use, name='login_link_use'),
+]
+
 from core import pwa_views
 urlpatterns += [
     path('sw.js', pwa_views.service_worker, name='service_worker'),

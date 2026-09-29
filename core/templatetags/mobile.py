@@ -50,7 +50,7 @@ TABS = {
     'client': [('Mi negocio', '/portal/', 'home'), ('Peticiones', '/portal/peticiones/', 'doc'), ('Gastos', '/portal/gastos/', 'bars'), ('Documentos', '/portal/documentos/', 'folder'), ('Cuenta', '/mas/', 'user')],
 }
 # Screens opened from "Más" keep that tab lit when no tab of their own matches.
-UNDER_MORE = ('/finanzas/', '/usuarios/', '/2fa/')
+UNDER_MORE = ('/finanzas/', '/usuarios/', '/2fa/', '/seguridad/')
 
 
 def active_href(tabs, path):
@@ -71,7 +71,7 @@ def tabbar(context):
 # Tab roots show the logo; every other screen gets "← Volver" to its parent.
 ROOTS = {href for tabs in TABS.values() for _, href, _ in tabs} | {'/finanzas/', '/usuarios/'}
 PARENTS = [(re.compile(r'^/clientes/[0-9a-f-]{36}/.+'), None), ('/clientes/', '/clientes/'), ('/propuestas/', '/propuestas/'),
-           ('/finanzas/', '/finanzas/'), ('/usuarios/', '/usuarios/'), ('/buscar/', '/buscar/'), ('/2fa/', '/mas/')]
+           ('/finanzas/', '/finanzas/'), ('/usuarios/', '/usuarios/'), ('/buscar/', '/buscar/'), ('/2fa/', '/mas/'), ('/seguridad/', '/mas/')]
 
 
 @register.simple_tag(takes_context=True)

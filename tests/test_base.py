@@ -9,9 +9,8 @@ pytestmark = pytest.mark.django_db
 def test_scope(accounts,businesses,role,count):
     assert Business.objects.visible_to(accounts[role]).count() == count
 
-@pytest.mark.parametrize('role', ['admin','developer','accountant'])
-def test_mandatory_otp(client,accounts,role):
-    client.force_login(accounts[role])
+def test_mandatory_otp_for_admin_by_default(client,accounts):
+    client.force_login(accounts['admin'])
     assert client.get('/clientes/').url == '/2fa/'
     assert client.get('/admin/').url == '/2fa/'
 

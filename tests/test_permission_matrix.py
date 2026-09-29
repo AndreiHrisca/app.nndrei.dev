@@ -42,7 +42,7 @@ CASES=[
  ('finance',[],AC,'get'),('finance_csv',[],AC,'get'),('receipt',['transaction'],AC,'get'),
  ('more',[],ALL,'get'),('business_note',['business'],AD,'post'),
  ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),
- ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),
+ ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),('security',[],ALL,'get'),('security_turn_off',[],ALL,'post'),('device_revoke_all',[],ALL,'post'),
 ]+[('business_resource',['business','='+k],AD,'both') for k in ['document','access','website']]+[('finance_create',['='+k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]+[('finance_edit',['='+k,k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]
 
 @pytest.mark.parametrize('role',ROLES)
@@ -75,7 +75,8 @@ def test_foreign_object_actions(sign_in,accounts,businesses,role):
 
 def test_matrix_covers_every_application_route():
     from config.urls import urlpatterns
-    exempt={'login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public'}
+    # device_revoke is owner-only by design: covered in test_access.test_only_the_owner_can_forget_a_device.
+    exempt={'device_revoke','login_link','login_link_use','login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public'}
     tested={case[0] for case in CASES}
     names={pattern.name for pattern in urlpatterns if getattr(pattern,'name',None)}
     assert names-tested-exempt==set()

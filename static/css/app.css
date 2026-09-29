@@ -299,3 +299,5 @@ table.clients td.cell-name{background:var(--surface)}
 .followup.is-overdue{border-color:var(--pink-border);background:var(--pink)}
 .m-quick>.m-quick-main{background:var(--accent);border-color:var(--accent);box-shadow:0 3px 0 rgba(0,0,0,.22);color:#fff}.m-quick>.m-quick-main svg{color:#fff}
 .m-quick>.m-quick-main~a:first-of-type{background:#fff;color:var(--text);border-color:var(--border);box-shadow:0 2px 0 var(--border)}
+.login-link{width:100%;margin:-8px 0 20px}
+.security-off{display:flex;flex-wrap:wrap;gap:0 12px;align-items:end}.security-off label{flex-basis:100%}.security-off input{flex:1;min-width:140px}

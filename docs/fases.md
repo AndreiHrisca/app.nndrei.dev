@@ -118,3 +118,15 @@ No se ha creado un «estado comercial»: se usan las fases existentes. `Visit` g
 **Descartados.** «Descartado» ya existía como salida con motivo obligatorio. Ahora la lista de Clientes los oculta salvo que se filtre por esa fase, y la ficha muestra el motivo y «Reactivar» (`/clientes/<uuid>/reactivar/`), que devuelve el negocio a la fase desde la que se descartó.
 
 Resultado: **738 pruebas superadas** + 5 de navegador (nueva: «He ido» en el móvil; capturas `393-admin-ficha-ir.png` y `393-admin-he-ido.png`).
+
+## 12. Verificación en dos pasos por rol y enlace para clientes
+
+**Política por rol** (`TwoFactorPolicy`, editable en `/admin/`; la migración `0019` crea los valores por defecto): administrador obligatoria (la app guarda enlaces a credenciales de clientes), desarrollador y contador opcional, cliente desactivada. Regla (`core/security.second_step_required`): se pide el código si el rol la exige **o** si la persona la tiene activada. Con «Opcional», cada cual la activa o desactiva en `/seguridad/` (desactivar pide un código actual). Con «Desactivada» no se ofrece a nadie nuevo, pero quien ya la tenía la sigue usando hasta que la quite: bajar la política nunca deja a nadie sin el segundo paso sin que lo decida.
+
+Cambio de comportamiento al desplegar: desarrolladores y contadores sin TOTP configurado dejan de ver la pantalla de alta; los que ya lo tienen siguen igual.
+
+**Recordar este dispositivo** (`TRUSTED_DEVICE_DAYS`, 30 por defecto): casilla en la pantalla del código. Cookie firmada, `HttpOnly`, `SameSite=Lax`, con el usuario y un token aleatorio; en base de datos solo el SHA-256 (`TrustedDevice`). Cuenta como segundo paso solo para su dueño, sin caducar y sin revocar. `/seguridad/` lista los dispositivos (sistema y navegador, alta, último uso, caducidad) y permite olvidar uno o todos; desactivar la verificación los olvida todos.
+
+**Enlace para clientes** (`/entrar/enlace/`): la respuesta es siempre la misma («Si ese email corresponde a un cliente…»), exista el email o no, sea o no cliente, y aunque se supere el límite. Límites contados en base de datos (el caché no se comparte entre procesos): 3 peticiones por email cada 15 minutos y 10 por IP de conexión cada hora (`LoginLinkRequest`). El enlace caduca a los 15 minutos, sirve una vez y usarlo gasta los demás pendientes de esa persona; en base de datos solo su hash (`LoginToken`). Abrirlo (`GET`) solo muestra un botón «Entrar»: los escáneres de correo que abren enlaces no lo gastan. El email sale por la cola del `worker`, para que la respuesta tarde lo mismo exista o no el email, y la bandeja borra la URL al enviarlo; si caduca antes de salir, no se envía. La contraseña sigue funcionando, y si el cliente activó el segundo paso, se le pide después del enlace.
+
+Resultado: **804 pruebas superadas** (incluye la matriz de login rol × política × dispositivo) + 5 de navegador; captura `393-*-seguridad.png`.
