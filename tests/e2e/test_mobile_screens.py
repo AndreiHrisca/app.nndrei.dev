@@ -311,3 +311,26 @@ def test_hours_and_near_me(browser, client, live_server, demo):
     assert page.locator('#clients-table .mob-only .list-card').count() == count
     assert page.locator('#clients-table .lc-distance').count() == 0
     context.close()
+
+
+def test_he_ido_sheet(browser, client, live_server, demo):
+    """Phase 2 on a phone: the go block, then "He ido" in a sheet that saves without leaving the card."""
+    b = demo['businesses'][0]
+    Business.objects.filter(pk=b.pk).update(stage='found')
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    assert page.locator('.go-card a', has_text='Waze').get_attribute('href').startswith('https://waze.com/ul?')
+    page.screenshot(path=str(OUT / '393-admin-ficha-ir.png'))
+    page.locator('.m-quick [data-sheet-open="m-visit-sheet"]').click()
+    sheet = page.locator('#m-visit-sheet')
+    sheet.locator('input[name="result"]').fill('Interesado')
+    sheet.locator('input[name="talked_to"]').fill('Santiago')
+    sheet.locator('input[name="next_step"]').fill('Enseñar la web de muestra')
+    sheet.locator('input[name="followup_date"]').fill((timezone.localdate() + timedelta(days=2)).isoformat())
+    assert overflow(page)['scroll'] <= PHONE['width']
+    sheet.screenshot(path=str(OUT / '393-admin-he-ido.png'))
+    sheet.get_by_role('button', name='Guardar visita').click()
+    page.wait_for_selector('text=Visita guardada. Fase: Visitado.')
+    b.refresh_from_db()
+    assert b.stage == 'visited' and FollowUp.objects.filter(business=b, description='Enseñar la web de muestra').exists()
+    context.close()

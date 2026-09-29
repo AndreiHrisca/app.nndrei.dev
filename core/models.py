@@ -354,6 +354,11 @@ class Visit(BusinessOwned):
     visitor = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
     result = models.CharField('Resultado',max_length=200)
     notes = models.TextField('Notas',blank=True)
+    talked_to = models.CharField('Con quién hablé',max_length=150,blank=True)
+    next_step = models.CharField('Próximo paso',max_length=300,blank=True)
+    followup_date = models.DateField('Fecha de seguimiento',null=True,blank=True)
+    # The pending action the visit created, so it shows in "Próximas acciones".
+    followup = models.ForeignKey('FollowUp',null=True,blank=True,on_delete=models.SET_NULL)
 
 class AdminQuerySet(models.QuerySet):
     def visible_to(self,user):

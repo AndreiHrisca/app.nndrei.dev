@@ -101,3 +101,20 @@ Caducidad: igual que los resultados de búsqueda, la copia de Google en un negoc
 Rutas nuevas (en la matriz de permisos, solo admin): `/clientes/<uuid>/horario/`, `/clientes/<uuid>/horario/google/` y `/clientes/<uuid>/actualizar-google/`.
 
 Resultado: **714 pruebas superadas** + 4 de navegador (nueva: editor de horario y «Cerca de mí» con y sin permiso; capturas `393-admin-horario*.png` y `393-admin-clientes-cerca.png`); `makemigrations --check` sin cambios.
+
+## 11. Ir al negocio, «He ido» y descartados
+
+**Ir al negocio.** Tarjeta con botones grandes a Google Maps (`/maps/dir/?api=1&destination=lat,lng&destination_place_id=…`), Waze (`ul?ll=…&navigate=yes`) y Apple Maps (`?daddr=…`). Sin coordenadas se usa la dirección codificada (o nombre y zona). En el móvil, la fila de acciones rápidas empieza por «He ido», luego Llamar, Nota rápida y Avanzar fase. Los enlaces se construyen en `core/visits.directions`.
+
+**He ido.** Hoja inferior con HTMX (`/clientes/<uuid>/visita/`; sin JavaScript es una página normal): resultado (con sugerencias), con quién hablé, cuándo (ahora, editable), notas, próximo paso, fecha de seguimiento y tipo. `core/visits.record_visit` lo guarda en una transacción: la visita (con quien la registra como visitante), una entrada en el historial interno, y
+
+- si el negocio estaba en «Encontrado» o «Estudiado», pasa a «Visitado» con su `StageChange`; nunca retrocede, y un descartado sigue descartado;
+- el próximo paso pasa a «Próxima acción» del negocio y, si tiene fecha, crea un `FollowUp` que aparece en «Próximas acciones» y en la columna «Siguiente paso».
+
+No se ha creado un «estado comercial»: se usan las fases existentes. `Visit` gana `talked_to`, `next_step`, `followup_date` y `followup`.
+
+**Próximas acciones.** Ordenadas por fecha; las vencidas llevan fondo rojo y «Vencida ·», las de hoy «Hoy». Los descartados no aparecen. La columna «Siguiente paso» muestra la acción pendiente más cercana o la «Próxima acción» del negocio, también marcada si está vencida.
+
+**Descartados.** «Descartado» ya existía como salida con motivo obligatorio. Ahora la lista de Clientes los oculta salvo que se filtre por esa fase, y la ficha muestra el motivo y «Reactivar» (`/clientes/<uuid>/reactivar/`), que devuelve el negocio a la fase desde la que se descartó.
+
+Resultado: **738 pruebas superadas** + 5 de navegador (nueva: «He ido» en el móvil; capturas `393-admin-ficha-ir.png` y `393-admin-he-ido.png`).

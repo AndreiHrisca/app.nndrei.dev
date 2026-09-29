@@ -68,6 +68,9 @@ def business_detail(request,public_id):
     context['request_labels']=labels.REQUEST_STATE_LABELS
     from .hours_views import hours_context
     context.update(hours_context(request.user,b))
+    from .forms import VisitLogForm
+    from .visits import directions
+    context.update({'go':directions(b),'visit_form':VisitLogForm(),'visit_results':labels.VISIT_RESULTS})
     return render(request,'core/business.html',context)
 
 def business_context(request,b,preview=False):
@@ -240,6 +243,9 @@ def business_list_context(request):
     stage = request.GET.get('stage', '')
     if stage in dict(STAGES):
         items = items.filter(stage=stage)
+    else:
+        # Discarded businesses are out of the way unless asked for by their stage.
+        items = items.exclude(stage='discarded')
     category = request.GET.get('category', '')
     if category.isdigit():
         items = items.filter(category_id=category)

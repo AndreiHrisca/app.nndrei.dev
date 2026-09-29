@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count,F,Min,Prefetch,Q
 from django.db.models.functions import Least
+from django.http import HttpResponse
 from django.shortcuts import redirect,render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -13,7 +14,7 @@ from . import labels
 from .access import scoped
 from .auth_views import roles
 from .models import Business,STAGES,FollowUp,Visit,SearchRun,SearchZone,SearchCategory,PlaceSnapshot,PlacesUsage
-from .forms import BusinessForm,FollowUpForm,VisitForm
+from .forms import BusinessForm,FollowUpForm
 from .services import transition_business,activity,STAGE_TRANSITIONS
 
 @roles('admin')
@@ -31,7 +32,7 @@ def pipeline(request):
             .order_by(F('next_date').asc(nulls_last=True),F('stage_changed_at').desc(nulls_last=True),'pk')
             .select_related('category')
             .prefetch_related(Prefetch('followup_set',queryset=pending,to_attr='pending_followups'),'assignments__developer'))
-    return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES],'followups':FollowUp.objects.visible_to(request.user).filter(done=False).order_by('date')[:20]})
+    return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES],'followups':FollowUp.objects.visible_to(request.user).filter(done=False).exclude(business__stage='discarded').select_related('business','owner').order_by('date','pk')[:20],'today':timezone.localdate()})
 
 @roles('admin')
 @require_POST
@@ -43,17 +44,47 @@ def stage(request,public_id):
     return redirect(b)
 
 @roles('admin')
-def followup(request,public_id,visit=False):
+def followup(request,public_id):
     b=scoped(Business,request.user,public_id)
-    form=(VisitForm if visit else FollowUpForm)(request.POST or None)
-    person='visitor' if visit else 'owner'
-    form.fields[person].queryset=form.fields[person].queryset.filter(role__in=['admin','developer'],is_active=True)
+    form=FollowUpForm(request.POST or None)
+    form.fields['owner'].queryset=form.fields['owner'].queryset.filter(role__in=['admin','developer'],is_active=True)
     if request.method=='POST' and form.is_valid():
         item=form.save(commit=False); item.business=b; item.save()
-        # The visit is now the step after the prior study, not the one after finding them.
-        if visit and b.stage=='profile_created': transition_business(request.user,b.public_id,'visited')
         return redirect(b)
-    return render(request,'core/form.html',{'form':form,'title':'Registrar visita' if visit else 'Próxima acción'})
+    return render(request,'core/form.html',{'form':form,'title':'Próxima acción'})
+
+@roles('admin')
+def visit(request,public_id):
+    """"He ido". The sheet on the card posts here with HTMX; the plain page is the no-JS path."""
+    from .forms import VisitLogForm
+    from .visits import record_visit
+    b=scoped(Business,request.user,public_id)
+    form=VisitLogForm(request.POST or None)
+    htmx=request.headers.get('HX-Request')
+    if request.method=='POST' and form.is_valid():
+        _,moved=record_visit(request.user,b.public_id,form.cleaned_data)
+        messages.success(request,labels.visit_saved(moved))
+        if htmx:
+            response=HttpResponse(status=204)
+            response['HX-Redirect']=b.get_absolute_url()
+            return response
+        return redirect(b)
+    context={'form':form,'business':b,'visit_results':labels.VISIT_RESULTS}
+    if htmx:
+        return render(request,'core/visit_form.html',context)
+    context['title']=labels.VISIT_TITLE+' · '+b.name
+    return render(request,'core/visit_page.html',context)
+
+@roles('admin')
+@require_POST
+def reactivate(request,public_id):
+    from .visits import reactivate as reactivate_business
+    try:
+        b=reactivate_business(request.user,public_id)
+    except ValidationError as exc:
+        return render(request,'core/error.html',{'error':'; '.join(exc.messages)},status=400)
+    messages.success(request,labels.REACTIVATE+': '+b.name+' vuelve a '+b.get_stage_display()+'.')
+    return redirect(b)
 
 @roles('admin')
 @require_POST

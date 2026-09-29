@@ -102,19 +102,33 @@ class VersionForm(forms.ModelForm):
         fields=['monthly_fee','notes']
 ProposalLineFormSet=forms.inlineformset_factory(ProposalVersion,ProposalLine,fields=['concept','description','amount','included'],extra=4,can_delete=True)
 
-from .models import FollowUp,Visit
+from .models import FollowUp
 class FollowUpForm(PublicIdModelForm):
     class Meta:
         model=FollowUp
         fields=['description','date','owner','kind']
         labels={'owner':'Responsable'}
         widgets={'date':forms.DateInput(attrs={'type':'date'})}
-class VisitForm(PublicIdModelForm):
-    class Meta:
-        model=Visit
-        fields=['date','visitor','result','notes']
-        labels={'visitor':'Quién fue'}
-        widgets={'date':forms.DateTimeInput(attrs={'type':'datetime-local'})}
+class VisitLogForm(forms.Form):
+    """"He ido": who you spoke to, how it went and what comes next. The visitor is you."""
+    date=forms.DateTimeField(label='Cuándo',widget=forms.DateTimeInput(attrs={'type':'datetime-local','step':'60'},format='%Y-%m-%dT%H:%M'),input_formats=['%Y-%m-%dT%H:%M'])
+    talked_to=forms.CharField(label='Con quién hablé',max_length=150,required=False)
+    result=forms.CharField(label='Resultado',max_length=200,widget=forms.TextInput(attrs={'list':'visit-results','autocomplete':'off'}))
+    notes=forms.CharField(label='Notas',required=False,widget=forms.Textarea(attrs={'rows':3}))
+    next_step=forms.CharField(label='Próximo paso',max_length=300,required=False)
+    followup_date=forms.DateField(label='Fecha de seguimiento',required=False,widget=forms.DateInput(attrs={'type':'date'}))
+    followup_kind=forms.ChoiceField(label='Tipo',required=False,initial='visit')
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.fields['followup_kind'].choices=FollowUp._meta.get_field('kind').choices
+        from django.utils import timezone
+        self.fields['date'].initial=timezone.localtime().replace(second=0,microsecond=0)
+    def clean(self):
+        data=super().clean()
+        if data.get('followup_date') and not data.get('next_step','').strip():
+            self.add_error('next_step','Indica qué toca hacer en esa fecha.')
+        return data
+
 
 from .models import ClientCharge,Transaction,RecurringExpense,Commission
 class ChargeForm(PublicIdModelForm):

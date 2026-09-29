@@ -52,7 +52,8 @@ urlpatterns += [
     path('buscar/<uuid:public_id>/descartar/',pipeline_views.place_discard,name='place_discard'),
     path('clientes/<uuid:public_id>/fase/',pipeline_views.stage,name='stage'),
     path('clientes/<uuid:public_id>/seguimiento/',pipeline_views.followup,name='followup'),
-    path('clientes/<uuid:public_id>/visita/',pipeline_views.followup,{'visit':True},name='visit'),
+    path('clientes/<uuid:public_id>/visita/',pipeline_views.visit,name='visit'),
+    path('clientes/<uuid:public_id>/reactivar/',pipeline_views.reactivate,name='business_reactivate'),
     path('seguimiento/<uuid:public_id>/hecho/',pipeline_views.followup_done,name='followup_done'),
 ]
 from core import finance_views

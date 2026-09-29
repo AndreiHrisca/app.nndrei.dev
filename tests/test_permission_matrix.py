@@ -42,7 +42,7 @@ CASES=[
  ('finance',[],AC,'get'),('finance_csv',[],AC,'get'),('receipt',['transaction'],AC,'get'),
  ('more',[],ALL,'get'),('business_note',['business'],AD,'post'),
  ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),
- ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),
+ ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),
 ]+[('business_resource',['business','='+k],AD,'both') for k in ['document','access','website']]+[('finance_create',['='+k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]+[('finance_edit',['='+k,k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]
 
 @pytest.mark.parametrize('role',ROLES)

@@ -40,6 +40,21 @@ def stage_activity(stage):
     return 'Fase: ' + STAGE_LABELS[stage]
 
 
+# --- Visits -----------------------------------------------------------------------
+
+VISIT_DONE = 'He ido'
+VISIT_TITLE = 'Registrar visita'
+GO_TO = 'Ir al negocio'
+REACTIVATE = 'Reactivar'
+DISCARDED_HIDDEN = 'Los descartados no se muestran. Elige la fase «Descartado» para verlos.'
+# Suggestions for "Resultado"; anything else can be typed.
+VISIT_RESULTS = ['Interesado', 'Quiere ver una propuesta', 'No estaba el responsable', 'Volver otro día', 'No interesado']
+
+
+def visit_saved(moved):
+    return 'Visita guardada.' + (' Fase: ' + STAGE_LABELS['visited'] + '.' if moved else '')
+
+
 # --- Roles, requests and other visible choices --------------------------------
 
 ROLE_LABELS = {'admin': 'Administrador', 'developer': 'Desarrollador', 'accountant': 'Contador', 'client': 'Cliente'}
