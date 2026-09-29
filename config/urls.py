@@ -88,6 +88,9 @@ urlpatterns += [
     path('entrar/<str:token>/', security_views.login_link_use, name='login_link_use'),
 ]
 
+from core import estimation_views
+urlpatterns += [path('clientes/<uuid:public_id>/estimacion/', estimation_views.business_estimation, name='business_estimation')]
+
 from core import pwa_views
 urlpatterns += [
     path('sw.js', pwa_views.service_worker, name='service_worker'),

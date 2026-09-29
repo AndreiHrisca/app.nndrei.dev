@@ -130,3 +130,21 @@ Cambio de comportamiento al desplegar: desarrolladores y contadores sin TOTP con
 **Enlace para clientes** (`/entrar/enlace/`): la respuesta es siempre la misma («Si ese email corresponde a un cliente…»), exista el email o no, sea o no cliente, y aunque se supere el límite. Límites contados en base de datos (el caché no se comparte entre procesos): 3 peticiones por email cada 15 minutos y 10 por IP de conexión cada hora (`LoginLinkRequest`). El enlace caduca a los 15 minutos, sirve una vez y usarlo gasta los demás pendientes de esa persona; en base de datos solo su hash (`LoginToken`). Abrirlo (`GET`) solo muestra un botón «Entrar»: los escáneres de correo que abren enlaces no lo gastan. El email sale por la cola del `worker`, para que la respuesta tarde lo mismo exista o no el email, y la bandeja borra la URL al enviarlo; si caduca antes de salir, no se envía. La contraseña sigue funcionando, y si el cliente activó el segundo paso, se le pide después del enlace.
 
 Resultado: **804 pruebas superadas** (incluye la matriz de login rol × política × dispositivo) + 5 de navegador; captura `393-*-seguridad.png`.
+
+## 13. Estimación de facturación (uso interno)
+
+Tarjeta «Estimación de facturación» en la ficha, **solo para administración**: `Estimation.objects.visible_to` devuelve vacío para cualquier otro rol, la tarjeta no se incluye para ellos y la entrada del historial («Nueva estimación de facturación.») no lleva cifras, porque los desarrolladores leen el historial interno.
+
+**Entradas** (prellenadas desde la última estimación o desde Google): reseñas, nota, años; ticket medio (vacío = tabla por nivel de precios de Google); mesas, personas por mesa, servicios (desayuno, comida, cena), rotaciones, días por semana, ocupación observada y concurrencia en la visita; facturación anual declarada con su fuente; si usa apps de reparto.
+
+**Cálculo** (`core/estimation.py`, puro y con pruebas):
+
+- Reseñas: clientes/año = (reseñas / años) / tasa_reseña; ×ticket, ÷12. La tasa central (2 %) da la cifra media; la alta (4 %) la baja y la baja (1 %) la alta.
+- Aforo: mesas × personas × rotaciones × servicios × días × ocupación × ticket por semana, ×52/12, ±20 %. Sin ocupación anotada se usa la de la concurrencia observada (baja 30 %, media 55 %, alta 80 %).
+- Facturación declarada: manda sobre los dos métodos (±10 %) y la confianza es alta. Con los dos métodos, media de ambos y el rango más amplio; confianza media si uno no llega al doble del otro, baja si no. Con uno solo, baja.
+- Banda por facturación mensual media (pequeño < 15.000 €, mediano < 60.000 €, grande), presupuesto sugerido dentro del rango (pequeño = mínimo, mediano = centro redondeado a 100 €, grande = máximo; 1.000–3.000 € por defecto).
+- Argumento para el cliente: «La web se paga con N clientes nuevos al mes durante X meses» con ticket × margen bruto (30 %); con reparto, también cuántos pedidos directos al mes la amortizan con la comisión (30 %).
+
+Todas las hipótesis están en `EstimationSettings` (`/admin/`, una fila). Cada estimación guarda sus entradas, el resultado, la explicación línea a línea y una copia de las hipótesis usadas, así que el histórico se puede reproducir aunque cambien los ajustes.
+
+Resultado: **829 pruebas superadas** + prueba de navegador de la tarjeta (`393-admin-estimacion*.png`).

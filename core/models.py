@@ -1,5 +1,6 @@
 import secrets
 import uuid
+from decimal import Decimal
 from datetime import timedelta
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -590,3 +591,89 @@ class LoginLinkRequest(models.Model):
     ip = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     objects = AdminRecordQuerySet.as_manager()
+
+
+# --- Revenue estimate (internal: admin only) -------------------------------------
+
+def default_price_tickets():
+    return {'PRICE_LEVEL_INEXPENSIVE': 10, 'PRICE_LEVEL_MODERATE': 20, 'PRICE_LEVEL_EXPENSIVE': 35, 'PRICE_LEVEL_VERY_EXPENSIVE': 60}
+
+
+def default_concurrency():
+    return {'low': 30, 'medium': 55, 'high': 80}
+
+
+class EstimationSettings(models.Model):
+    """The assumptions behind every estimate, edited in /admin/. One row."""
+    review_rate = models.DecimalField('Tasa de reseña (central)', max_digits=5, decimal_places=4, default=Decimal('0.02'), help_text='Parte de los clientes que deja reseña. Es la hipótesis más débil.')
+    review_rate_low = models.DecimalField('Tasa de reseña baja', max_digits=5, decimal_places=4, default=Decimal('0.01'), help_text='Da la cifra alta.')
+    review_rate_high = models.DecimalField('Tasa de reseña alta', max_digits=5, decimal_places=4, default=Decimal('0.04'), help_text='Da la cifra baja.')
+    price_level_tickets = models.JSONField('Ticket por nivel de precios de Google (€)', default=default_price_tickets)
+    concurrency_occupancy = models.JSONField('Ocupación por concurrencia observada (%)', default=default_concurrency, help_text='Se usa si no se anota la ocupación.')
+    small_max = models.DecimalField('Pequeño: facturación mensual por debajo de (€)', max_digits=12, decimal_places=2, default=Decimal('15000'))
+    medium_max = models.DecimalField('Mediano: facturación mensual por debajo de (€)', max_digits=12, decimal_places=2, default=Decimal('60000'))
+    budget_min = models.DecimalField('Presupuesto mínimo (€)', max_digits=10, decimal_places=2, default=Decimal('1000'))
+    budget_max = models.DecimalField('Presupuesto máximo (€)', max_digits=10, decimal_places=2, default=Decimal('3000'))
+    gross_margin = models.DecimalField('Margen bruto', max_digits=4, decimal_places=3, default=Decimal('0.30'))
+    delivery_commission = models.DecimalField('Comisión de las apps de reparto', max_digits=4, decimal_places=3, default=Decimal('0.30'))
+    payback_months = models.PositiveSmallIntegerField('Meses para amortizar la web', default=12)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Ajustes de la estimación'
+        verbose_name_plural = 'Ajustes de la estimación'
+
+    def __str__(self):
+        return 'Ajustes de la estimación'
+
+    @classmethod
+    def load(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+    def as_settings(self):
+        from .estimation import Settings
+        return Settings(**{f: getattr(self, f) for f in ['review_rate', 'review_rate_low', 'review_rate_high', 'price_level_tickets', 'concurrency_occupancy',
+                                                         'small_max', 'medium_max', 'budget_min', 'budget_max', 'gross_margin', 'delivery_commission', 'payback_months']})
+
+
+class EstimationQuerySet(ScopedQuerySet):
+    def visible_to(self, user):
+        return super().visible_to(user) if user.is_authenticated and user.role == 'admin' else self.none()
+
+
+class Estimation(PublicIdModel, BusinessOwned):
+    """One estimate, kept as history: inputs, result and the assumptions used."""
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT)
+    source = models.CharField(max_length=10, choices=[('web', 'Web'), ('mcp', 'Claude (MCP)')], default='web')
+    # Inputs
+    reviews = models.PositiveIntegerField('Reseñas totales', null=True, blank=True)
+    rating = models.DecimalField('Nota', max_digits=2, decimal_places=1, null=True, blank=True)
+    years = models.DecimalField('Antigüedad (años)', max_digits=5, decimal_places=1, null=True, blank=True)
+    ticket = models.DecimalField('Ticket medio por persona (€)', max_digits=8, decimal_places=2, null=True, blank=True, help_text='Vacío: se deduce del nivel de precios de Google.')
+    price_level = models.CharField('Nivel de precios de Google', max_length=40, blank=True)
+    tables = models.PositiveSmallIntegerField('Mesas', null=True, blank=True)
+    people_per_table = models.DecimalField('Personas por mesa', max_digits=4, decimal_places=1, null=True, blank=True)
+    services = models.JSONField('Servicios', default=list, blank=True)
+    rotations = models.DecimalField('Rotaciones por servicio', max_digits=4, decimal_places=1, null=True, blank=True)
+    days_per_week = models.PositiveSmallIntegerField('Días abiertos por semana', null=True, blank=True)
+    occupancy_pct = models.DecimalField('Ocupación media observada (%)', max_digits=5, decimal_places=1, null=True, blank=True)
+    concurrency = models.CharField('Concurrencia en la visita', max_length=10, blank=True, choices=[('low', 'Baja'), ('medium', 'Media'), ('high', 'Alta')])
+    declared_annual = models.DecimalField('Facturación anual declarada (€)', max_digits=14, decimal_places=2, null=True, blank=True)
+    declared_source = models.CharField('Fuente de la facturación declarada', max_length=200, blank=True)
+    uses_delivery = models.BooleanField('Usa apps de reparto', default=False)
+    # Result
+    monthly_low = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    monthly_mid = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    monthly_high = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    confidence = models.CharField(max_length=10, choices=[('low', 'Baja'), ('medium', 'Media'), ('high', 'Alta')])
+    band = models.CharField(max_length=10, blank=True, choices=[('small', 'Pequeño'), ('medium', 'Mediano'), ('large', 'Grande')])
+    suggested_budget = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    used_ticket = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    explanation = models.JSONField(default=list)
+    payback = models.JSONField(default=dict)
+    assumptions = models.JSONField(default=dict)
+    objects = EstimationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at', '-pk']

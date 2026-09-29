@@ -71,6 +71,9 @@ def business_detail(request,public_id):
     from .forms import VisitLogForm
     from .visits import directions
     context.update({'go':directions(b),'visit_form':VisitLogForm(),'visit_results':labels.VISIT_RESULTS})
+    if request.user.role=='admin':
+        from .estimation_views import estimation_context
+        context.update(estimation_context(request.user,b))
     return render(request,'core/business.html',context)
 
 def business_context(request,b,preview=False):

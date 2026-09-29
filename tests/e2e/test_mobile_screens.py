@@ -334,3 +334,31 @@ def test_he_ido_sheet(browser, client, live_server, demo):
     b.refresh_from_db()
     assert b.stage == 'visited' and FollowUp.objects.filter(business=b, description='Enseñar la web de muestra').exists()
     context.close()
+
+
+def test_estimation_card(browser, client, live_server, demo):
+    """Phase 5 on a phone: fill what you saw, get the monthly range and the pitch."""
+    b = demo['businesses'][1]
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    page.locator('#estimation-card').get_by_role('button', name='Estimar').click()
+    page.wait_for_selector('#estimation-card form')
+    card = page.locator('#estimation-card')
+    card.locator('input[name="reviews"]').fill('480')
+    card.locator('input[name="years"]').fill('4')
+    card.locator('input[name="ticket"]').fill('18')
+    card.locator('input[name="tables"]').fill('12')
+    card.locator('input[name="people_per_table"]').fill('4')
+    card.get_by_label('Comida').check()
+    card.get_by_label('Cena').check()
+    card.locator('input[name="rotations"]').fill('1')
+    card.locator('input[name="days_per_week"]').fill('6')
+    card.locator('select[name="concurrency"]').select_option('medium')
+    card.get_by_label('Usa apps de reparto').check()
+    assert overflow(page)['scroll'] <= PHONE['width']
+    card.screenshot(path=str(OUT / '393-admin-estimacion-form.png'))
+    card.get_by_role('button', name='Calcular y guardar').click()
+    page.wait_for_selector('#estimation-card .est-mid')
+    card.locator('.est-how summary').click()
+    page.locator('#estimation-card').screenshot(path=str(OUT / '393-admin-estimacion.png'))
+    context.close()

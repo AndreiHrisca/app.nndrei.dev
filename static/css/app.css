@@ -301,3 +301,22 @@ table.clients td.cell-name{background:var(--surface)}
 .m-quick>.m-quick-main~a:first-of-type{background:#fff;color:var(--text);border-color:var(--border);box-shadow:0 2px 0 var(--border)}
 .login-link{width:100%;margin:-8px 0 20px}
 .security-off{display:flex;flex-wrap:wrap;gap:0 12px;align-items:end}.security-off label{flex-basis:100%}.security-off input{flex:1;min-width:140px}
+
+/* Estimación de facturación (admin only). */
+.est-result{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
+.est-mid{font-size:32px;font-weight:800;letter-spacing:-.02em}
+.est-chips{gap:8px;margin-bottom:12px}
+.est-pitch{background:var(--inset);border:1px solid var(--border);border-radius:16px;padding:12px 14px;margin:12px 0}
+.est-pitch p{margin:6px 0 0}
+.est-how summary,.est-history summary{cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center}
+.est-how ul{margin:0 0 8px;padding-left:18px}.est-how li{margin-bottom:6px;font-size:14px}
+.est-group{border:0;border-top:1px solid var(--divider);margin:0;padding:12px 0 0}
+.est-group legend{font-weight:800;padding:0;margin-top:8px}
+.est-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0 12px}
+.est-field.is-wide{grid-column:1/-1}
+.est-field label{margin:12px 0 6px}
+.est-field ul{list-style:none;padding:0;margin:0;display:flex;gap:8px 16px;flex-wrap:wrap}
+.est-field ul label{display:inline-flex;align-items:center;gap:8px;text-transform:none;font-size:15px;font-weight:600;margin:0;min-height:44px}
+#id_services{display:flex;gap:4px 20px;flex-wrap:wrap}
+#id_services label{display:inline-flex;align-items:center;gap:8px;text-transform:none;font-size:15px;font-weight:600;margin:0;min-height:44px}
+.est-group{margin-top:16px}
