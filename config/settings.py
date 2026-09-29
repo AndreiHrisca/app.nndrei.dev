@@ -59,6 +59,8 @@ X_FRAME_OPTIONS = 'DENY'
 GOOGLE_PLACES_API_KEY = env('GOOGLE_PLACES_API_KEY', default='')
 PLACES_MONTHLY_LIMIT = env.int('PLACES_MONTHLY_LIMIT', default=800)
 PLACES_WEEKLY_REFRESH = env.bool('PLACES_WEEKLY_REFRESH', default=False)
+# "Actualizar" skips zone × category pairs fetched fewer days ago than this.
+PLACES_REFRESH_MIN_DAYS = env.int('PLACES_REFRESH_MIN_DAYS', default=7)
 PROPOSAL_LINK_MAX_AGE = env.int('PROPOSAL_LINK_MAX_AGE', default=604800)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 

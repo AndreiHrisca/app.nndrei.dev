@@ -3,6 +3,7 @@ import re
 from django import template
 from django.utils.html import format_html
 from django.utils.timesince import timesince
+from core import labels
 
 register = template.Library()
 
@@ -42,7 +43,7 @@ def icon(name, size=22):
 
 # Five thumbs' worth of destinations per role; everything else lives under "Más".
 TABS = {
-    'admin': [('Pipeline', '/', 'pipeline'), ('Buscar', '/buscar/', 'search'), ('Clientes', '/clientes/', 'clients'), ('Propuestas', '/propuestas/', 'doc'), ('Más', '/mas/', 'more')],
+    'admin': [(labels.PIPELINE, '/', 'pipeline'), ('Buscar', '/buscar/', 'search'), ('Clientes', '/clientes/', 'clients'), ('Propuestas', '/propuestas/', 'doc'), ('Más', '/mas/', 'more')],
     'developer': [('Clientes', '/clientes/', 'clients'), ('Propuestas', '/propuestas/', 'doc'), ('Más', '/mas/', 'more')],
     'accountant': [('Clientes', '/clientes/', 'clients'), ('Propuestas', '/propuestas/', 'doc'), ('Finanzas', '/finanzas/', 'bars'), ('Más', '/mas/', 'more')],
     'client': [('Mi negocio', '/portal/', 'home'), ('Peticiones', '/portal/peticiones/', 'doc'), ('Gastos', '/portal/gastos/', 'bars'), ('Documentos', '/portal/documentos/', 'folder'), ('Cuenta', '/mas/', 'user')],

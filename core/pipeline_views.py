@@ -31,7 +31,7 @@ def pipeline(request):
             .order_by(F('next_date').asc(nulls_last=True),F('stage_changed_at').desc(nulls_last=True),'pk')
             .select_related('category')
             .prefetch_related(Prefetch('followup_set',queryset=pending,to_attr='pending_followups'),'assignments__developer'))
-    return render(request,'core/pipeline.html',{'title':'Pipeline','businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':('Aprobado' if key=='approved' else label),'count':counts.get(key,0)} for key,label in STAGES],'followups':FollowUp.objects.visible_to(request.user).filter(done=False).order_by('date')[:20]})
+    return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES],'followups':FollowUp.objects.visible_to(request.user).filter(done=False).order_by('date')[:20]})
 
 @roles('admin')
 @require_POST
@@ -83,7 +83,20 @@ def search(request):
     all_places,places=search_queryset(request)
     context={'title':'Buscar clientes','places':Paginator(places.select_related('zone','category','business').order_by('-opportunity_score','pk'),50).get_page(request.GET.get('page')),'zones':SearchZone.objects.visible_to(request.user),'categories':SearchCategory.objects.visible_to(request.user),'run':SearchRun.objects.visible_to(request.user).order_by('-pk').first(),'usage':PlacesUsage.objects.filter(month=timezone.localdate().replace(day=1)).first(),'limit':settings.PLACES_MONTHLY_LIMIT}
     context.update(search_counters(all_places))
+    context.update(refresh_texts(context['usage'].requests if context['usage'] else 0))
     return render(request,'core/search.html',context)
+
+def refresh_texts(used):
+    """What pressing "Actualizar" will cost, said before it is pressed."""
+    from .places import pending_slices
+    pending=len(pending_slices())
+    left=max(0,settings.PLACES_MONTHLY_LIMIT-used)
+    days=settings.PLACES_REFRESH_MIN_DAYS
+    if not pending:
+        return {'refresh_hint':f'Todo se ha consultado en los últimos {days} días: actualizar ahora no gasta llamadas.',
+                'refresh_confirm':f'Todo está al día (consultado hace menos de {days} días). No se gastará ninguna llamada. ¿Seguir?'}
+    return {'refresh_hint':f'Actualizar consultará {pending} combinaciones de zona y sector sin revisar en {days} días (entre {pending} y {pending*3} llamadas; quedan {left} este mes).',
+            'refresh_confirm':f'Se consultarán {pending} combinaciones de zona y sector: entre {pending} y {pending*3} llamadas de las {left} que te quedan este mes. ¿Seguir?'}
 
 def opportunity_response(request,snapshot):
     """Swap the acted-on row in place and refresh the counters out of band."""
@@ -152,7 +165,10 @@ def capture(request,snapshot,form=None):
             b=form.save(commit=False)
         else:
             b=Business(name=snapshot.name,category=snapshot.category,address=snapshot.address,phone=snapshot.phone,zone=snapshot.zone.name,current_website=snapshot.website_url)
-        b.google_place_id=snapshot.place_id; b.save()
+        b.google_place_id=snapshot.place_id
+        from .places import apply_snapshot
+        apply_snapshot(b,snapshot)
+        b.save()
         snapshot.business=b; snapshot.status='pipeline'; snapshot.save()
         activity(b,'created',labels.CAPTURE_ACTIVITY,request.user,client_visible=False)
     return snapshot

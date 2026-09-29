@@ -234,7 +234,7 @@ def test_phone_interactions(browser, client, live_server, demo):
     first = page.locator('#op-list .list-card', has=page.get_by_role('button', name='Captar')).first
     name, card_id = first.locator('.lc-title').inner_text(), first.get_attribute('id')
     first.get_by_role('button', name='Captar').click()
-    page.wait_for_selector(f'#{card_id} >> text=En pipeline')
+    page.wait_for_selector(f'#{card_id} >> text=En seguimiento')
     assert Business.objects.filter(name=name).exists()
 
     # Clientes: typing filters the list in place.
@@ -256,4 +256,58 @@ def test_phone_interactions(browser, client, live_server, demo):
     page.get_by_role('button', name='Guardar nota').click()
     page.wait_for_selector('text=Nota guardada en el historial.')
     assert ActivityEvent.objects.filter(business=demo['businesses'][1], text='Nota: Volver el jueves por la tarde').exists()
+    context.close()
+
+
+def test_hours_and_near_me(browser, client, live_server, demo):
+    """Phase 1 on a phone: type the hours with the thumb, then sort the list by distance."""
+    b = demo['businesses'][1]
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    page.get_by_role('button', name='Editar horario').click()
+    page.wait_for_selector('[data-hours-editor]')
+    monday = page.locator('[data-hours-day="1"]')
+    monday.locator('input[name="d1_s0_open"]').fill('10:00')
+    monday.locator('input[name="d1_s0_close"]').fill('14:00')
+    monday.get_by_role('button', name='+ Añadir tramo').click()
+    monday.locator('input[name="d1_s1_open"]').fill('20:00')
+    monday.locator('input[name="d1_s1_close"]').fill('02:00')
+    page.get_by_role('button', name='Copiar el lunes a martes–viernes').click()
+    assert page.locator('input[name="d5_s1_close"]').input_value() == '02:00'
+    page.locator('[data-hours-day="0"] [data-closed-toggle]').check()
+    page.locator('[data-hours-day="6"] [data-closed-toggle]').check()
+    assert overflow(page)['scroll'] <= PHONE['width']
+    page.locator('#hours-card').screenshot(path=str(OUT / '393-admin-horario-editor.png'))
+    page.get_by_role('button', name='Guardar horario').click()
+    page.wait_for_selector('#hours-card >> text=Puesto a mano')
+    b.refresh_from_db()
+    assert b.hours_source == 'manual' and len(b.opening_hours) == 10
+    page.locator('#hours-card').screenshot(path=str(OUT / '393-admin-horario.png'))
+    context.close()
+
+    # "Cerca de mí" with permission: nearest first, a distance on the card, no position in the URL.
+    near, far = demo['businesses'][0], demo['businesses'][2]
+    Business.objects.filter(pk=near.pk).update(latitude=40.4005, longitude=-3.7)
+    Business.objects.filter(pk=far.pk).update(latitude=40.45, longitude=-3.7)
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    context.grant_permissions(['geolocation'])
+    context.set_geolocation({'latitude': 40.4, 'longitude': -3.7})
+    visit(page, live_server.url + '/clientes/')
+    page.locator('#m-quick-filters [data-near]').click()
+    page.wait_for_selector('#clients-table .mob-only .lc-distance')
+    titles = page.locator('#clients-table .mob-only .lc-title').all_inner_texts()
+    assert titles[:2] == [near.name, far.name]
+    assert 'sort=cerca' in page.url and 'lat=' not in page.url
+    page.screenshot(path=str(OUT / '393-admin-clientes-cerca.png'))
+    context.close()
+
+    # Without permission the list stays usable and says why there are no distances.
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + '/clientes/')
+    count = page.locator('#clients-table .mob-only .list-card').count()
+    page.locator('#m-quick-filters [data-near]').click()
+    page.wait_for_selector('[data-near-note]:not([hidden])')
+    assert page.locator('#clients-table .mob-only .list-card').count() == count
+    assert page.locator('#clients-table .lc-distance').count() == 0
     context.close()

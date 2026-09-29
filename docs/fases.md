@@ -75,3 +75,29 @@ Decisión: el swipe para captar/descartar se omite; con la confirmación obligat
 **Pruebas de navegador**: `docker compose -p nndrei-validation -f compose.test.yaml run --rm e2e` (imagen `Dockerfile.e2e`, WebKit). Recorre 18 pantallas de los cuatro roles a 375, 393 y 430 px y falla si `scrollWidth > innerWidth`; prueba además los flujos HTMX (filtro por fase, bottom sheet, Captar, «Cargar más», búsqueda, cambio de mes, nota rápida). Capturas en `docs/screenshots/mobile/`: `393-<rol>-<pantalla>.png` (lo que se ve al abrir) y `-full.png` (página entera sin barras fijas); las de 1440 px, en `desktop/`. La suite normal la omite si no hay Playwright.
 
 Resultado: **614 pruebas superadas** + 3 de navegador; `makemigrations --check` sin cambios.
+
+## 9. Textos comprensibles
+
+Todos los textos visibles que se renombran viven en `core/labels.py`: fases (`STAGE_LABELS`), roles, estados de petición, títulos, botones y mensajes. Los modelos construyen sus `choices` desde ahí y las plantillas leen las constantes con `{% label 'NOMBRE' %}` (cualquier constante en mayúsculas de texto). No cambian modelos, campos, URLs ni valores guardados: la migración `0016_visible_labels` solo altera los `choices` y no ejecuta SQL.
+
+Cambios: «Pipeline» → «Seguimiento»; «+ Nuevo lead» → «+ Nuevo negocio»; «N en el embudo» → «N en marcha»; fases Estudiado, Propuesta enviada, Cambios en la propuesta, Aprobado (también en la chip, antes «Presupuesto aprobado»), En construcción, Revisión final y Web publicada; «En pipeline» → «En seguimiento»; «2FA» → «Verificación en dos pasos»; roles Administrador y Desarrollador; «Hosting» → «Alojamiento web»; «Demo» → «Web de muestra»; estados de petición En construcción, Revisión final y Publicada. El historial de actividad ya escrito conserva su texto antiguo porque es inmutable.
+
+Resultado: **661 pruebas superadas**; `makemigrations --check` sin cambios.
+
+## 10. Horarios, «abierto ahora» y «Cerca de mí»
+
+**Datos.** `Business` gana `latitude`, `longitude`, `opening_hours` (JSON), `hours_source` (`google`/`manual`), `hours_updated_at`, y la copia de Google (`google_hours`, `google_rating`, `google_reviews`, `google_price_level`, `google_maps_url`, `google_fetched_at`). El horario usa el mismo formato que `regularOpeningHours.periods` de Places API (New): día 0 = domingo, un cierre en el día siguiente cruza la medianoche y un único periodo sin cierre es 24 horas. Un horario manual nunca se sobrescribe; «Volver al horario de Google» usa `google_hours` sin llamar a la API.
+
+**Sin llamadas nuevas a Google.** No hay refresco diario: la cuota es de 800 llamadas al mes. La búsqueda de «Buscar clientes» pide además `regularOpeningHours`, `utcOffsetMinutes` y `priceLevel` (la máscara ya estaba en el nivel de precio de esos campos), y cada resultado cuyo `place_id` coincide con un negocio actualiza su horario, ubicación y nota con la misma llamada. `SearchSlice` guarda cuándo se consultó cada zona × sector: «Actualizar» se salta las combinaciones consultadas hace menos de `PLACES_REFRESH_MIN_DAYS` días (7 por defecto) y la pantalla dice antes de pulsar cuántas llamadas puede gastar. Para un negocio que no sale en ninguna búsqueda, la ficha ofrece «Actualizar desde Google» (Place Details, 1 llamada, con confirmación). Las vistas nunca llaman a la API al mostrarse.
+
+Caducidad: igual que los resultados de búsqueda, la copia de Google en un negocio se borra a los 30 días en `daily_maintenance` (`expire_google_data`). El horario puesto a mano es dato propio y se conserva.
+
+**Estado.** `core/hours.py` es puro (`hours_status(periods, now)`), en hora de Madrid: «Abierto, cierra a las 23:30», «Cierra en 40 min» (menos de 60), «Cerrado, abre a las 17:00», «Cerrado hoy, abre mañana a las 07:30», «Cerrado hoy, abre el martes a las 07:30», «Abierto 24 horas» y «Horario desconocido». Tramos contiguos se funden, incluido el paso de sábado a domingo.
+
+**Clientes.** Cada negocio muestra su estado (el desconocido, en gris discreto). «Abiertos ahora» filtra; «Cerca de mí» pide la ubicación al navegador, la manda solo con esa petición y el servidor la quita de la URL que se guarda en el historial (`HX-Push-Url`). Ordena por distancia (haversine de `places.distance_m`) con los negocios sin coordenadas al final, y muestra «650 m» o «1,2 km». Sin permiso, la lista sigue igual y lo explica. Se calcula en Python porque la lista no está paginada.
+
+**Ficha.** Tarjeta «Horario» con la semana (hoy resaltado), origen y fecha. El editor (solo admin) tiene siete días con «Cerrado», hasta tres tramos por día, «+ Añadir tramo» y «Copiar el lunes a martes–viernes»; valida tramos incompletos y solapados. Cada cambio queda en el historial interno.
+
+Rutas nuevas (en la matriz de permisos, solo admin): `/clientes/<uuid>/horario/`, `/clientes/<uuid>/horario/google/` y `/clientes/<uuid>/actualizar-google/`.
+
+Resultado: **714 pruebas superadas** + 4 de navegador (nueva: editor de horario y «Cerca de mí» con y sin permiso; capturas `393-admin-horario*.png` y `393-admin-clientes-cerca.png`); `makemigrations --check` sin cambios.

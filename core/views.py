@@ -1,4 +1,5 @@
 from django.shortcuts import redirect, render
+from . import labels
 from .access import scoped
 from .auth_views import roles
 from .models import Business, ClientCharge, Proposal, ProposalVersion
@@ -17,7 +18,22 @@ def businesses(request):
     context = business_list_context(request)
     # The search box and the filters swap only the table, not the whole page.
     partial = request.headers.get('HX-Request') and not request.headers.get('HX-Boosted')
-    return render(request, 'core/business_table.html' if partial else 'core/list.html', context)
+    response = render(request, 'core/business_table.html' if partial else 'core/list.html', context)
+    if partial and ('lat' in request.GET or 'lng' in request.GET):
+        # Where you are standing never reaches the address bar or the history.
+        query = request.GET.copy()
+        query.pop('lat', None); query.pop('lng', None)
+        response['HX-Push-Url'] = request.path + ('?' + query.urlencode() if query else '')
+    return response
+
+
+def near_point(request):
+    """The browser's position for "Cerca de mí", or None if absent or nonsense."""
+    try:
+        lat, lng = float(request.GET['lat']), float(request.GET['lng'])
+    except (KeyError, ValueError):
+        return None
+    return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -36,7 +52,7 @@ def business_create(request):
         item = form.save()
         activity(item,'created','Ficha de negocio creada.',request.user,client_visible=False)
         return redirect(item)
-    return render(request,'core/form.html',{'form':form,'title':'Nuevo lead'})
+    return render(request,'core/form.html',{'form':form,'title':labels.NEW_BUSINESS_TITLE})
 
 @roles('admin','developer','accountant')
 def business_detail(request,public_id):
@@ -49,6 +65,9 @@ def business_detail(request,public_id):
     context['transitions']=[(k,v) for k,v in STAGES if k in STAGE_TRANSITIONS.get(b.stage,set())]
     from .models import StageChange
     context['stage_changes']=StageChange.objects.visible_to(request.user).filter(business=b).order_by('occurred_at')
+    context['request_labels']=labels.REQUEST_STATE_LABELS
+    from .hours_views import hours_context
+    context.update(hours_context(request.user,b))
     return render(request,'core/business.html',context)
 
 def business_context(request,b,preview=False):
@@ -231,11 +250,31 @@ def business_list_context(request):
     ordering = ('-' if descending else '') + field
     # Businesses with no activity or no planned action sort last either way.
     items = items.order_by(nulls_last(ordering), 'name' if field != 'name' else 'pk')
-    return {'title': 'Clientes', 'businesses': items, 'query': query,
+    # Hours and distance are worked out here, in Python: the list is short and
+    # unpaginated, and "open now" depends on each business's own week.
+    from .hours import format_distance, hours_status
+    from .places import distance_m
+    from django.utils import timezone
+    now = timezone.now()
+    point = near_point(request) if sort == 'cerca' else None
+    open_now = request.GET.get('abierto') == '1'
+    rows = list(items)
+    for b in rows:
+        b.hours_state = hours_status(b.opening_hours, now)
+        b.distance = distance_m(point[0], point[1], b.latitude, b.longitude) if point and b.latitude is not None and b.longitude is not None else None
+        b.distance_text = format_distance(b.distance)
+    if open_now:
+        rows = [b for b in rows if b.hours_state.is_open]
+    if point:
+        # Businesses without coordinates keep their order, after the located ones.
+        rows.sort(key=lambda b: (b.distance is None, b.distance or 0))
+    if sort == 'cerca':
+        key, descending = 'cerca', False
+    return {'title': 'Clientes', 'businesses': rows, 'open_now': open_now, 'near': bool(point), 'clients_subtitle': labels.CLIENTS_SUBTITLE, 'query': query,
             'show_study': request.user.role in STUDY_ROLES,
             'stages': STAGES, 'stage': stage,
             'categories': SearchCategory.objects.filter(active=True).order_by('name'), 'category': category,
-            'sort': ('-' if descending else '') + key,
+            'sort': ('-' if descending else '') + key if key != 'cerca' else 'cerca',
             # Clicking the current column flips the direction; any other column starts ascending.
             'sort_toggles': {name: ('-' + name if name == key and not descending else name) for name in BUSINESS_SORTS},
             'sort_arrows': {name: ('▼' if descending else '▲') if name == key else '' for name in BUSINESS_SORTS}}

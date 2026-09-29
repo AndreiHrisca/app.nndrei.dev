@@ -28,4 +28,4 @@ Las pruebas usan Python 3.12 y PostgreSQL 16 temporal, sin datos reales. Para ve
 
 El detalle de implementación, verificación y decisiones está en `docs/fases.md`.
 
-Los estáticos se recopilan al construir la imagen. No es necesario ejecutar collectstatic en un contenedor efímero. Los accesos a negocios se gestionan en Usuarios; las coordenadas y categorías, en `/admin/`. El contador nunca recibe repositorios, notas internas ni costes ajenos a sus vistas económicas.
+Los estáticos se recopilan al construir la imagen. No es necesario ejecutar collectstatic en un contenedor efímero. Los accesos a negocios se gestionan en Usuarios; las coordenadas y categorías, en `/admin/`. «Actualizar» en Buscar clientes solo repite las zonas y sectores consultados hace más de `PLACES_REFRESH_MIN_DAYS` días. El contador nunca recibe repositorios, notas internas ni costes ajenos a sus vistas económicas.

@@ -72,13 +72,13 @@ def test_stage_row_is_an_ordered_list_with_decorative_arrows(sign_in,businesses)
     body=sign_in('admin').get('/').content.decode()
     row=body[body.index('<ol class="stages">'):body.index('</ol>')+5]
     assert row.count('<li class="stage-step">')==9
-    # Eight arrows for nine steps: none after Producción, and all of them decorative.
+    # Eight arrows for nine steps: none after Web publicada, and all of them decorative.
     assert row.count('stage-arrow')==8
     assert row.count('aria-hidden="true"')==8
     assert 'stage-arrow' not in row[row.rindex('<li class="stage-step">'):]
     assert 'stroke-dasharray' in row and '↻' in row
 
-NEW_ORDER=['Encontrado','Ficha creada','Visitado','Propuesta','Revisión','Presupuesto aprobado','Desarrollo','Pruebas','Producción','Descartado']
+NEW_ORDER=['Encontrado','Estudiado','Visitado','Propuesta enviada','Cambios en la propuesta','Aprobado','En construcción','Revisión final','Web publicada','Descartado']
 
 def test_stage_order_is_defined_once():
     from core.models import STAGES,STAGE_ORDER
@@ -89,8 +89,7 @@ def test_pipeline_tiles_follow_the_new_order(sign_in,businesses):
     import re
     row=sign_in('admin').get('/').content.decode()
     row=row[row.index('<ol class="stages">'):row.index('</ol>')]
-    # The tile shortens 'Presupuesto aprobado' to 'Aprobado'; the order is what matters.
-    assert re.findall(r'<b>([^<]*)</b>',row)==['Aprobado' if x=='Presupuesto aprobado' else x for x in NEW_ORDER[:9]]
+    assert re.findall(r'<b>([^<]*)</b>',row)==NEW_ORDER[:9]
     assert re.findall(r'<span class="stage-number">(\d+)</span>',row)==[f'{i:02d}' for i in range(1,10)]
 
 def test_selects_follow_the_new_order(sign_in,businesses):
@@ -119,3 +118,14 @@ def test_clients_table_sorts_by_pipeline_order_not_alphabet(sign_in,businesses):
     body=sign_in('admin').get('/clientes/',{'sort':'fase'}).content.decode()
     # Alphabetically 'found' > 'production'; by pipeline order it comes first.
     assert body.index(other.name)<body.index(own.name)
+
+
+def test_visible_wording_comes_from_labels(client, django_user_model):
+    """Texts are renamed in core.labels; stored values stay the same."""
+    from core import labels
+    from core.models import STAGES, ROLES, REQUEST_STATES
+    assert dict(STAGES)['production'] == 'Web publicada' and dict(STAGES)['profile_created'] == 'Estudiado'
+    assert dict(ROLES)['developer'] == 'Desarrollador'
+    assert dict(REQUEST_STATES)['production'] == 'Publicada'
+    assert labels.stage_activity('review') == 'Fase: Cambios en la propuesta'
+    assert labels.in_progress_count(3) == '3 en marcha'

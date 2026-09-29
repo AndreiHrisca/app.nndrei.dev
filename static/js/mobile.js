@@ -78,3 +78,81 @@ document.addEventListener('submit', event => {
   const message = event.target.dataset?.confirm;
   if (message && !confirm(message)) event.preventDefault();
 }, true);
+
+// "Cerca de mí": the browser's position goes with the filter request only.
+// The server strips it from the pushed URL, so it never lands in the history;
+// without permission the list simply stays as it was, without distances.
+(() => {
+  const note = (form, text) => {
+    const box = form.querySelector('[data-near-note]');
+    if (box) { box.textContent = text; box.hidden = !text; }
+  };
+  const locate = (form, button) => {
+    if (!navigator.geolocation) { note(form, 'Este navegador no puede darte la ubicación. La lista sigue igual.'); return; }
+    const label = button?.innerHTML;
+    if (button) { button.disabled = true; button.textContent = 'Buscando…'; }
+    const done = () => { if (button) { button.disabled = false; button.innerHTML = label; } };
+    navigator.geolocation.getCurrentPosition(position => {
+      done();
+      note(form, '');
+      form.elements.lat.value = position.coords.latitude.toFixed(5);
+      form.elements.lng.value = position.coords.longitude.toFixed(5);
+      form.elements.sort.value = 'cerca';
+      document.querySelectorAll('[data-near].chip').forEach(chip => chip.classList.add('is-on'));
+      form.requestSubmit();
+    }, () => {
+      done();
+      note(form, 'Sin permiso de ubicación: la lista sigue igual, sin distancias.');
+    }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 60000});
+  };
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-near]');
+    if (button) locate(button.form, button);
+  });
+  // Choosing "Más cerca de mí" in the sheet asks for the position first.
+  document.addEventListener('submit', event => {
+    const form = event.target;
+    if (form.elements?.sort?.value === 'cerca' && form.elements.lat && !form.elements.lat.value) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      form.querySelectorAll('dialog[open]').forEach(sheet => sheet.close());
+      locate(form);
+    }
+  }, true);
+  // Reopening a list sorted by distance: ask again only if already allowed.
+  const form = document.querySelector('form [data-near]')?.form;
+  if (form && new URLSearchParams(location.search).get('sort') === 'cerca' && navigator.permissions) {
+    navigator.permissions.query({name: 'geolocation'}).then(state => { if (state.state === 'granted') locate(form); }).catch(() => {});
+  }
+})();
+
+// Hours editor: "Cerrado" hides the slots, "+ Añadir tramo" shows the next one,
+// and Monday can be copied to the rest of the working week.
+document.addEventListener('change', event => {
+  const toggle = event.target.closest('[data-closed-toggle]');
+  if (toggle) toggle.closest('[data-hours-day]').classList.toggle('is-closed', toggle.checked);
+});
+document.addEventListener('click', event => {
+  const add = event.target.closest('[data-add-slot]');
+  if (add) {
+    const next = add.closest('[data-hours-day]').querySelector('[data-slot][hidden]');
+    if (next) { next.hidden = false; next.querySelector('input').focus(); }
+    if (!add.closest('[data-hours-day]').querySelector('[data-slot][hidden]')) add.hidden = true;
+    return;
+  }
+  const copy = event.target.closest('[data-copy-monday]');
+  if (!copy) return;
+  const editor = copy.closest('[data-hours-editor]');
+  const monday = editor.querySelector('[data-hours-day="1"]');
+  const values = [...monday.querySelectorAll('input[type=time]')].map(input => input.value);
+  const closed = monday.querySelector('[data-closed-toggle]').checked;
+  for (const day of [2, 3, 4, 5]) {
+    const row = editor.querySelector(`[data-hours-day="${day}"]`);
+    row.querySelectorAll('input[type=time]').forEach((input, index) => { input.value = values[index]; });
+    row.querySelectorAll('[data-slot]').forEach((slot, index) => { slot.hidden = index > 0 && !values[index * 2] && !values[index * 2 + 1]; });
+    row.querySelector('[data-add-slot]').hidden = !row.querySelector('[data-slot][hidden]');
+    const toggle = row.querySelector('[data-closed-toggle]');
+    toggle.checked = closed;
+    row.classList.toggle('is-closed', closed);
+  }
+});

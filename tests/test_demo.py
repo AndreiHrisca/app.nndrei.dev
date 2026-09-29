@@ -68,13 +68,13 @@ def test_admin_uploads_replaces_and_deletes(sign_in, businesses, settings):
     stage = own.stage
     client = sign_in('admin')
     page = client.get(own.get_absolute_url()).content.decode()
-    assert 'Subir demo' in page and 'Demo disponible' not in page
+    assert 'Subir web de muestra' in page and 'Web de muestra disponible' not in page
     assert 'Aún no hay una web publicada.' in page
 
     assert upload(client, own).status_code == 302
     assert client.get(demo_url(own)).content == DEMO
     page = client.get(own.get_absolute_url()).content.decode()
-    assert 'Demo disponible' in page and 'Copiar enlace' in page and 'Eliminar demo' in page
+    assert 'Web de muestra disponible' in page and 'Copiar enlace' in page and 'Eliminar web de muestra' in page
     assert f'{settings.SITE_URL}/clientes/{own.public_id}/demo-cliente' in page
     assert 'Aún no hay una web publicada.' in page
 
@@ -119,18 +119,18 @@ def test_developer_sees_the_link_but_no_controls(sign_in, businesses):
     own = businesses[0]
     save_demo(own, DEMO)
     page = sign_in('developer').get(own.get_absolute_url()).content.decode()
-    assert 'Abrir demo' in page and 'Copiar enlace' in page
-    assert 'Eliminar demo' not in page and 'Reemplazar' not in page
+    assert 'Abrir web de muestra' in page and 'Copiar enlace' in page
+    assert 'Eliminar web de muestra' not in page and 'Reemplazar' not in page
 
 
 def test_demo_link_in_client_view(sign_in, businesses, client):
     own = businesses[0]
     save_demo(own, DEMO)
     preview = sign_in('admin').get(f'/clientes/{own.public_id}/portal/').content.decode()
-    assert 'Abrir demo' in preview and 'Subir demo' not in preview and 'Eliminar demo' not in preview
+    assert 'Abrir web de muestra' in preview and 'Subir web de muestra' not in preview and 'Eliminar web de muestra' not in preview
     client.logout()
     portal = sign_in('client').get(f'/portal/negocio/{own.public_id}/').content.decode()
-    assert 'Abrir demo' in portal and 'Eliminar demo' not in portal
+    assert 'Abrir web de muestra' in portal and 'Eliminar web de muestra' not in portal
 
 
 def test_session_cookies_are_out_of_scripts_reach(client, accounts):

@@ -260,3 +260,24 @@ table.clients td.cell-name .place{display:block;margin-top:2px;font-size:12px;wh
 table.clients th:first-child,table.clients td.cell-name{position:sticky;left:0;z-index:1;box-shadow:inset -1px 0 0 var(--divider)}
 table.clients td.cell-name{background:var(--surface)}
 .page-clients tbody tr.row-link:hover td.cell-name{background:var(--inset)}
+
+/* Opening hours and distance (clients list, business card). */
+.hours-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.hours-line small,.lc-distance{font-size:12px;color:var(--muted);font-weight:700}
+.check-inline{display:inline-flex;align-items:center;gap:8px;min-height:44px;margin:0;text-transform:none;font-size:14px;font-weight:600}
+.near-note{flex-basis:100%;margin:4px 0 0;font-size:13px}
+.m-chips button.chip{box-shadow:0 2px 0 var(--b);gap:6px}
+.hours-week{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:12px 0;font-size:14px}
+.hours-week dt{font-size:14px;color:var(--text);font-weight:600}.hours-week dd{margin:0}
+.hours-week .is-today{font-weight:800;color:var(--accent)}
+.hours-day{border-bottom:1px solid var(--divider);padding:10px 0}
+.hours-day-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.hours-day-head b{font-size:15px}
+.hours-slot{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-top:8px}
+.hours-slot input{min-height:48px;font-size:16px}
+.hours-day.is-closed .hours-slot,.hours-day.is-closed [data-add-slot]{display:none}
+.hours-tools{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.list-card .hours-line>*{flex:0 0 auto}.list-card:has(.lc-call) .hours-line{padding-right:46px}
+.hours-line .dot{font-size:12px;color:var(--muted);font-weight:600}
+.hours-slot[hidden],.hours-day [data-add-slot][hidden]{display:none}
+.business-overview dl.hours-week,.card dl.hours-week{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 16px}

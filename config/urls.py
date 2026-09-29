@@ -70,6 +70,13 @@ urlpatterns += [path('documentos/<uuid:public_id>/estado/',views.document_edit,n
 urlpatterns += [path('peticiones/<uuid:public_id>/planificar/',views.request_plan,name='request_plan')]
 urlpatterns += [path('mas/',views.more,name='more'),path('clientes/<uuid:public_id>/nota/',views.business_note,name='business_note')]
 
+from core import hours_views
+urlpatterns += [
+    path('clientes/<uuid:public_id>/horario/', hours_views.business_hours, name='business_hours'),
+    path('clientes/<uuid:public_id>/horario/google/', hours_views.business_hours_reset, name='business_hours_reset'),
+    path('clientes/<uuid:public_id>/actualizar-google/', hours_views.business_google_refresh, name='business_google_refresh'),
+]
+
 from core import pwa_views
 urlpatterns += [
     path('sw.js', pwa_views.service_worker, name='service_worker'),

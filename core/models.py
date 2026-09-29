@@ -8,12 +8,14 @@ from django.db import models
 from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
+from . import labels
 
-ROLES = [('admin', 'Admin'), ('developer', 'Developer'), ('accountant', 'Contador'), ('client', 'Cliente')]
+ROLES = list(labels.ROLE_LABELS.items())
 # The single source of truth for the pipeline order: the tiles, the selects, the
 # filters, the table sorting and STAGE_TRANSITIONS all read their order from here.
 # 'discarded' stays last on purpose: it is a way out, not a step.
-STAGES = [('found', 'Encontrado'), ('profile_created', 'Ficha creada'), ('visited', 'Visitado'), ('proposal', 'Propuesta'), ('review', 'Revisión'), ('approved', 'Presupuesto aprobado'), ('development', 'Desarrollo'), ('testing', 'Pruebas'), ('production', 'Producción'), ('discarded', 'Descartado')]
+# Visible names come from core.labels.
+STAGES = [(key, labels.STAGE_LABELS[key]) for key in ['found', 'profile_created', 'visited', 'proposal', 'review', 'approved', 'development', 'testing', 'production', 'discarded']]
 STAGE_ORDER = {key: index for index, (key, _) in enumerate(STAGES)}
 
 class PublicIdModel(models.Model):
@@ -87,6 +89,21 @@ class Business(PublicIdModel):
     discarded_reason = models.TextField(blank=True)
     next_action = models.CharField('Próxima acción', max_length=200, blank=True)
     next_action_date = models.DateField('Fecha de la próxima acción', null=True, blank=True)
+    # Location and hours. Google data is cached for at most 30 days (see
+    # tasks.daily_maintenance); hand-typed hours are ours and never expire.
+    latitude = models.FloatField('Latitud', null=True, blank=True)
+    longitude = models.FloatField('Longitud', null=True, blank=True)
+    opening_hours = models.JSONField('Horario', null=True, blank=True, help_text='Periodos en el formato de Places API (New). Ver core/hours.py.')
+    hours_source = models.CharField('Origen del horario', max_length=10, blank=True, choices=[('google', 'Google'), ('manual', 'Manual')])
+    hours_updated_at = models.DateTimeField('Horario actualizado', null=True, blank=True)
+    # The last hours Google gave, kept apart so "Volver al horario de Google"
+    # works without calling the API again.
+    google_hours = models.JSONField(null=True, blank=True)
+    google_rating = models.FloatField(null=True, blank=True)
+    google_reviews = models.PositiveIntegerField(null=True, blank=True)
+    google_price_level = models.CharField(max_length=40, blank=True)
+    google_maps_url = models.URLField(max_length=1000, blank=True)
+    google_fetched_at = models.DateTimeField(null=True, blank=True)
     objects = BusinessQuerySet.as_manager()
 
     def __str__(self):
@@ -200,7 +217,7 @@ class Document(PublicIdModel, BusinessOwned):
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
-REQUEST_STATES = [('requested','Solicitada'),('accepted','Aceptada'),('in_progress','En desarrollo'),('testing','En pruebas'),('production','En producción'),('rejected','Rechazada')]
+REQUEST_STATES = list(labels.REQUEST_STATE_LABELS.items())
 
 class Request(PublicIdModel, BusinessOwned):
     title = models.CharField('Título', max_length=200)
@@ -377,11 +394,28 @@ class PlaceSnapshot(PublicIdModel):
     zone = models.ForeignKey(SearchZone,on_delete=models.PROTECT)
     category = models.ForeignKey(SearchCategory,on_delete=models.PROTECT)
     opportunity_score = models.PositiveSmallIntegerField(default=0)
-    status = models.CharField(max_length=20,choices=[('new','Nuevo'),('pipeline','En pipeline'),('discarded','Descartado')],default='new')
+    status = models.CharField(max_length=20,choices=[('new','Nuevo'),('pipeline',labels.OPPORTUNITY_IN_PIPELINE),('discarded','Descartado')],default='new')
     notes = models.TextField(blank=True)
     business = models.ForeignKey(Business,null=True,blank=True,on_delete=models.PROTECT)
     distance_m = models.PositiveIntegerField(default=0)
+    latitude = models.FloatField(null=True,blank=True)
+    longitude = models.FloatField(null=True,blank=True)
+    opening_hours = models.JSONField(null=True,blank=True)
+    price_level = models.CharField(max_length=40,blank=True)
     objects = AdminQuerySet.as_manager()
+
+class SearchSlice(models.Model):
+    """When a zone × category pair was last asked to Google.
+
+    "Actualizar" skips pairs fetched in the last PLACES_REFRESH_MIN_DAYS, so
+    pressing it twice does not spend the monthly quota twice.
+    """
+    zone = models.ForeignKey(SearchZone,on_delete=models.CASCADE)
+    category = models.ForeignKey(SearchCategory,on_delete=models.CASCADE)
+    fetched_at = models.DateTimeField()
+    objects = AdminQuerySet.as_manager()
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['zone','category'],name='unique_search_slice')]
 
 class PlacesUsage(models.Model):
     month = models.DateField(unique=True)
@@ -398,7 +432,7 @@ class SearchRun(PublicIdModel):
     objects = AdminQuerySet.as_manager()
 
 PERIODS=[('once','Única'),('monthly','Mensual'),('annual','Anual')]
-CATEGORIES=[('development','Desarrollo'),('maintenance','Mantenimiento'),('domain','Dominio'),('hosting','Hosting'),('tools','Herramientas'),('materials','Material'),('commission','Comisión'),('tax','Impuestos'),('other','Otro')]
+CATEGORIES=[('development','Desarrollo'),('maintenance','Mantenimiento'),('domain','Dominio'),('hosting',labels.HOSTING),('tools','Herramientas'),('materials','Material'),('commission','Comisión'),('tax','Impuestos'),('other','Otro')]
 
 class ChargeQuerySet(ScopedQuerySet):
     def visible_to(self,user):

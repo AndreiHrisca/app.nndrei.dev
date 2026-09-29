@@ -3,6 +3,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from . import labels
 from .access import scoped
 from .models import ActivityEvent, Request
 from .notifications import notify
@@ -63,7 +64,7 @@ def transition_business(user,public_id,target,reason='',accepting=False):
     b.stage_changed_at=timezone.now()
     b.discarded_reason=reason if target=='discarded' else ''
     b.save()
-    activity(b,'stage_changed','Fase: '+b.get_stage_display(),user,b,client_visible=target not in {'found','visited','discarded'})
+    activity(b,'stage_changed',labels.stage_activity(target),user,b,client_visible=target not in {'found','visited','discarded'})
     return b
 
 @transaction.atomic
@@ -142,7 +143,7 @@ def proposal_action(user,public_id,action,comment='',ip=None,expected_version=No
             b=Business.objects.select_for_update().get(pk=proposal.business_id)
             StageChange.objects.create(business=b,from_stage=b.stage,to_stage='review',actor=user)
             b.stage='review'; b.stage_changed_at=timezone.now(); b.save()
-            activity(b,'stage_changed','Fase: Revisión',user,b)
+            activity(b,'stage_changed',labels.stage_activity('review'),user,b)
         text='Propuesta '+proposal.number+': '+proposal.get_status_display()
         transaction.on_commit(lambda: notify(text,[settings.ADMIN_EMAIL],comment or text,settings.SITE_URL+proposal.get_absolute_url()))
     else:

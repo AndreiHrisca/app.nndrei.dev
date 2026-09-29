@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django_otp import login as otp_login
 from django_otp.plugins.otp_totp.models import TOTPDevice
+from . import labels
 from .access import scoped
 from .forms import AcceptInvitationForm, InvitationForm
 from .models import User, Invitation, ClientMembership
@@ -77,7 +78,7 @@ def users(request):
         notify('Tu invitación a nndrei', [invitation.email], 'Configura tu acceso. El enlace caduca en 7 días.', settings.SITE_URL + '/invitacion/' + invitation.token + '/')
         messages.success(request, 'Invitación enviada.')
         return redirect('users')
-    return render(request, 'core/users.html', {'title': 'Usuarios', 'form': form, 'users': User.objects.visible_to(request.user).prefetch_related('totpdevice_set','clientmembership_set__business','assignment_set__business')})
+    return render(request, 'core/users.html', {'title': 'Usuarios', 'form': form, 'role_labels': labels.ROLE_LABELS, 'users': User.objects.visible_to(request.user).prefetch_related('totpdevice_set','clientmembership_set__business','assignment_set__business')})
 
 @roles('admin')
 def user_edit(request,public_id):
