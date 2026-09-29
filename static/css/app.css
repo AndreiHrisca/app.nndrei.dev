@@ -320,3 +320,10 @@ table.clients td.cell-name{background:var(--surface)}
 #id_services{display:flex;gap:4px 20px;flex-wrap:wrap}
 #id_services label{display:inline-flex;align-items:center;gap:8px;text-transform:none;font-size:15px;font-weight:600;margin:0;min-height:44px}
 .est-group{margin-top:16px}
+
+/* Demo QR and AI drafts. */
+.demo-meta{display:flex;gap:12px;align-items:center;margin:12px 0;overflow-wrap:anywhere}
+.demo-qr{width:112px;height:112px;border-radius:8px;border:1px solid var(--border);flex-shrink:0;background:#fff}
+.ai-note{margin:12px 0}.ai-note p{margin:0 0 12px}
+.study-sources{margin:0;padding-left:18px}.study-sources li{margin-bottom:4px;overflow-wrap:anywhere}
+.consent-card{max-width:560px}.consent-list{padding-left:20px}.consent-list li{margin-bottom:8px}

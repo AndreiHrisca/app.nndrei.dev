@@ -148,3 +148,33 @@ Tarjeta «Estimación de facturación» en la ficha, **solo para administración
 Todas las hipótesis están en `EstimationSettings` (`/admin/`, una fila). Cada estimación guarda sus entradas, el resultado, la explicación línea a línea y una copia de las hipótesis usadas, así que el histórico se puede reproducir aunque cambien los ajustes.
 
 Resultado: **829 pruebas superadas** + prueba de navegador de la tarjeta (`393-admin-estimacion*.png`).
+
+## 14. Conector MCP para Claude
+
+**Servicio.** `mcp` en `compose.yaml`: misma imagen, `uvicorn core.mcp_server:app`, misma base de datos y volumen privado. Transporte HTTP streamable en `https://app.nndrei.dev/mcp` con el SDK oficial (`mcp==2.0.0`, fijado como en Diario). Va aparte porque la web sigue en Gunicorn (WSGI) y el SDK es ASGI; así un fallo de uno no tumba al otro.
+
+**Autenticación, como Diario.** Claude.ai solo conecta por OAuth, así que el servicio es su propio servidor de autorización (OAuth 2.1 con registro dinámico de clientes y PKCE, del SDK). Diferencia con Diario: `/authorize` no pide una contraseña compartida, sino que manda a `/conectar-claude/` en la web. Allí se aplican el login normal, la verificación en dos pasos y los límites de intentos. Solo un administrador puede pulsar «Permitir», y la conexión queda ligada a él. Access token de 1 hora, refresh de 30 días con rotación, revocación RFC 7009. Todo en PostgreSQL (`McpClient`, `McpAuthRequest`, `McpCode`, `McpToken`) y códigos y tokens solo como SHA-256. Cada llamada comprueba que la persona sigue activa y es administradora: si se le quita el rol, pierde el acceso al momento. En **Más → Seguridad → Conexiones con Claude** se ven las conexiones activas y se cortan.
+
+**Herramientas** (lógica en `core/mcp_tools.py`, probada sin el protocolo; descripciones en español en `core/mcp_server.py`): `buscar_clientes(texto?, estado?)`, `get_cliente(id)`, `crear_cliente(nombre, direccion, place_id?)` (idempotente por `place_id`; si ese sitio está en «Buscar clientes», lo enlaza y trae horario y ubicación), `guardar_estudio(cliente_id, campos, fuentes?)`, `guardar_fuentes(cliente_id, urls)`, `subir_demo(cliente_id, nombre_archivo, html)` y `guardar_estimacion(cliente_id, datos)`. Se validan tipos, campos conocidos, longitudes (texto ≤ 5000 o el máximo del campo), URLs http/https (≤ 50 por llamada, ≤ 100 por estudio) y HTML UTF-8 ≤ 5 MB. Cada escritura deja una entrada interna «Claude: …» en el historial (`mcp_*`; la estimación, «Nueva estimación de facturación. (Claude)»).
+
+**Borrador IA.** El estudio gana `ai_draft`, `ai_updated_at`, `ai_sources`, `validated_by` y `validated_at`. Lo que entra por MCP queda como «Borrador IA», con fecha y fuentes. En la ficha, la etiqueta y «Validar estudio» (admin y desarrollador). Una escritura posterior de Claude lo vuelve a dejar como borrador.
+
+**Webs de muestra versionadas.** Cada subida (web o MCP) es una `DemoVersion` en `demos/<pk>/v<n>.html`; la última es la pública en `/demos/<slug>/`. El slug es fijo por negocio: nombre + 6 caracteres aleatorios (`bar-pepe-7k3mzp`), para que no se pueda adivinar. Se sirve sin sesión, con `Content-Security-Policy: sandbox …` (origen opaco: no lee cookies ni nada de la app), `noindex`, `no-store` y `no-referrer`. La dirección antigua `/clientes/<uuid>/demo-cliente/` redirige (301) a la nueva. La demo única de antes pasa a ser la versión 1 en la siguiente subida. En la ficha se ven la versión, las anteriores y el QR (`/clientes/<uuid>/demo/qr.png`, PNG descargable).
+
+**Caddy.** Añadir a `app.nndrei.dev` en `~/stacks/webs/_proxy/Caddyfile`, en lugar del `reverse_proxy` actual:
+
+```caddyfile
+	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/* /authorize /token /register /revoke
+	handle @mcp {
+		reverse_proxy nndrei-app-mcp:8000
+	}
+	handle {
+		reverse_proxy nndrei-app-web:8000
+	}
+```
+
+`SITE_URL` debe ser exactamente `https://app.nndrei.dev` (sin barra final): es el `issuer` de OAuth y Claude.ai lo compara literalmente. En Claude: Configuración → Conectores → Añadir conector personalizado → `https://app.nndrei.dev/mcp`.
+
+Comprobado: 19 pruebas (herramientas una a una y el flujo entero de Claude.ai con registro, autorización, consentimiento, token, `initialize`, `tools/list`, `tools/call`, error de validación, rotación del refresh y desconexión) y arranque real con Uvicorn: metadatos OAuth con `issuer` `https://app.nndrei.dev` y `/mcp` sin token → 401 con `resource_metadata`.
+
+Resultado: **876 pruebas superadas** + 6 de navegador; `makemigrations --check` y `manage.py check` sin incidencias.

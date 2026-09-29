@@ -9,5 +9,8 @@ gunicorn>=23,<24
 WeasyPrint>=66,<69
 requests>=2.32,<3
 qrcode>=8,<9
+# Fixed on purpose: a silent SDK change would break the Claude connector.
+mcp==2.0.0
+uvicorn>=0.52,<1
 pytest>=8,<10
 pytest-django>=4.11,<5

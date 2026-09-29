@@ -28,6 +28,8 @@ def route_objects(accounts,businesses):
     charge=ClientCharge.objects.create(business=b,concept='Cargo',kind='maintenance',amount=20)
     expense=RecurringExpense.objects.create(concept='Server',amount=5)
     commission=Commission.objects.create(business=b,beneficiary='Person',fixed_amount=10)
+    from core.demos import save_demo
+    save_demo(b,b'<!doctype html><title>Demo</title>')
     return {'business':b.public_id,'request':req.public_id,'document':doc.public_id,'proposal':p.public_id,'draft':draft.public_id,'version':v.number,'followup':f.public_id,'place':place.public_id,'run':run.public_id,'transaction':tx.public_id,'charge':charge.public_id,'expense':expense.public_id,'commission':commission.public_id,'user':accounts['developer'].public_id}
 
 CASES=[
@@ -42,7 +44,7 @@ CASES=[
  ('finance',[],AC,'get'),('finance_csv',[],AC,'get'),('receipt',['transaction'],AC,'get'),
  ('more',[],ALL,'get'),('business_note',['business'],AD,'post'),
  ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),
- ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),('security',[],ALL,'get'),('business_estimation',['business'],ADMIN,'both'),('security_turn_off',[],ALL,'post'),('device_revoke_all',[],ALL,'post'),
+ ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),('security',[],ALL,'get'),('business_estimation',['business'],ADMIN,'both'),('study_validate',['business'],AD,'post'),('mcp_consent',[],ADMIN,'both'),('demo_qr',['business'],AD,'get'),('security_turn_off',[],ALL,'post'),('device_revoke_all',[],ALL,'post'),
 ]+[('business_resource',['business','='+k],AD,'both') for k in ['document','access','website']]+[('finance_create',['='+k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]+[('finance_edit',['='+k,k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]
 
 @pytest.mark.parametrize('role',ROLES)
@@ -76,7 +78,8 @@ def test_foreign_object_actions(sign_in,accounts,businesses,role):
 def test_matrix_covers_every_application_route():
     from config.urls import urlpatterns
     # device_revoke is owner-only by design: covered in test_access.test_only_the_owner_can_forget_a_device.
-    exempt={'device_revoke','login_link','login_link_use','login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public'}
+    # mcp_disconnect is owner-only (a grant id): covered in test_mcp.
+    exempt={'mcp_disconnect','demo_slug','device_revoke','login_link','login_link_use','login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public'}
     tested={case[0] for case in CASES}
     names={pattern.name for pattern in urlpatterns if getattr(pattern,'name',None)}
     assert names-tested-exempt==set()

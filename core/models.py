@@ -105,6 +105,9 @@ class Business(PublicIdModel):
     google_price_level = models.CharField(max_length=40, blank=True)
     google_maps_url = models.URLField(max_length=1000, blank=True)
     google_fetched_at = models.DateTimeField(null=True, blank=True)
+    # Public demo address, /demos/<slug>/: the name plus a random part, so it
+    # cannot be guessed from the business name.
+    demo_slug = models.SlugField(max_length=60, unique=True, null=True, blank=True)
     objects = BusinessQuerySet.as_manager()
 
     def __str__(self):
@@ -192,6 +195,12 @@ class Study(PublicIdModel, BusinessOwned):
     notes = models.TextField('Notas del estudio', blank=True)
     created_at = models.DateTimeField('Fecha del estudio', auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Whatever Claude writes through MCP is a draft until a person validates it.
+    ai_draft = models.BooleanField('Borrador IA', default=False)
+    ai_updated_at = models.DateTimeField('Escrito por la IA', null=True, blank=True)
+    ai_sources = models.JSONField('Fuentes', default=list, blank=True)
+    validated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
+    validated_at = models.DateTimeField(null=True, blank=True)
 
     # The two answers that have to exist before a visit is worth booking. The same
     # rule gates the stage button and the indicator in the Clientes table.
@@ -677,3 +686,72 @@ class Estimation(PublicIdModel, BusinessOwned):
 
     class Meta:
         ordering = ['-created_at', '-pk']
+
+
+# --- Demo versions ----------------------------------------------------------------
+
+class DemoVersion(BusinessOwned):
+    """Every demo ever published for a business; the newest one is the public one."""
+    number = models.PositiveIntegerField()
+    filename = models.CharField(max_length=120)
+    path = models.CharField(max_length=200)
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    source = models.CharField(max_length=10, choices=[('web', 'Web'), ('mcp', 'Claude (MCP)')], default='web')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-number']
+        constraints = [models.UniqueConstraint(fields=['business', 'number'], name='unique_demo_version')]
+
+
+# --- MCP connector: OAuth 2.1 state (Claude.ai registers itself by DCR) ------------
+
+class McpClient(models.Model):
+    client_id = models.CharField(max_length=255, unique=True)
+    info = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = AdminRecordQuerySet.as_manager()
+
+    @property
+    def name(self):
+        return self.info.get('client_name') or 'Cliente MCP'
+
+
+class McpAuthRequest(models.Model):
+    """An /authorize waiting for an admin to approve it in the web app."""
+    txn = models.CharField(max_length=64, unique=True)
+    client_id = models.CharField(max_length=255)
+    params = models.JSONField()
+    expires_at = models.DateTimeField()
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class McpCode(models.Model):
+    code_hash = models.CharField(max_length=64, unique=True)
+    client_id = models.CharField(max_length=255)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    params = models.JSONField()
+    expires_at = models.FloatField()
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class McpTokenQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        return self.filter(user=user) if user.is_authenticated and user.role == 'admin' else self.none()
+
+
+class McpToken(models.Model):
+    """Access and refresh tokens, by hash. A grant is one approved connection."""
+    token_hash = models.CharField(max_length=64, unique=True)
+    kind = models.CharField(max_length=10, choices=[('access', 'Acceso'), ('refresh', 'Renovación')])
+    grant_id = models.CharField(max_length=64, db_index=True)
+    client_id = models.CharField(max_length=255)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mcp_tokens')
+    scopes = models.JSONField(default=list)
+    resource = models.CharField(max_length=500, blank=True)
+    expires_at = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    objects = McpTokenQuerySet.as_manager()

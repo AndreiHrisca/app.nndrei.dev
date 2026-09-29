@@ -11,7 +11,7 @@ class TwoFactorMiddleware:
 
     def __call__(self, request):
         user = request.user
-        allowed = request.path in {'/2fa/', '/logout/', '/sw.js', '/manifest.webmanifest', '/offline/'} or request.path.startswith(('/static/', '/entrar/')) or DEMO_PATH.match(request.path)
+        allowed = request.path in {'/2fa/', '/logout/', '/sw.js', '/manifest.webmanifest', '/offline/'} or request.path.startswith(('/static/', '/entrar/', '/demos/')) or DEMO_PATH.match(request.path)
         if user.is_authenticated and not allowed and not user.is_verified():
             # The role's policy (TwoFactorPolicy) decides; a remembered device counts as the second step.
             from .security import second_step_required, verify_with_trusted_device

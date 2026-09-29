@@ -27,6 +27,7 @@ urlpatterns += [
     path('clientes/<uuid:public_id>/portal/', views.portal_preview, name='portal_preview'),
     path('clientes/<uuid:public_id>/peticiones/', views.request_create, name='request_create'),
     path('clientes/<uuid:public_id>/estudio/', views.study, name='study'),
+    path('clientes/<uuid:public_id>/estudio/validar/', views.study_validate, name='study_validate'),
     path('peticiones/<uuid:public_id>/estado/', views.request_status, name='request_status'),
     path('documentos/<uuid:public_id>/', views.document_download, name='document_download'),
     path('portal/negocio/<uuid:public_id>/', views.portal, name='portal_business'),
@@ -91,6 +92,12 @@ urlpatterns += [
 from core import estimation_views
 urlpatterns += [path('clientes/<uuid:public_id>/estimacion/', estimation_views.business_estimation, name='business_estimation')]
 
+from core import mcp_views
+urlpatterns += [
+    path('conectar-claude/', mcp_views.consent, name='mcp_consent'),
+    path('seguridad/claude/<str:grant_id>/desconectar/', mcp_views.disconnect, name='mcp_disconnect'),
+]
+
 from core import pwa_views
 urlpatterns += [
     path('sw.js', pwa_views.service_worker, name='service_worker'),
@@ -103,4 +110,8 @@ urlpatterns += [
     path('clientes/<uuid:public_id>/demo-cliente/', views.demo_public),
     path('clientes/<uuid:public_id>/demo/', views.demo_upload, name='demo_upload'),
     path('clientes/<uuid:public_id>/demo/eliminar/', views.demo_delete, name='demo_delete'),
+    path('clientes/<uuid:public_id>/demo/qr.png', views.demo_qr, name='demo_qr'),
+    # Public: the newest demo version, no session needed.
+    path('demos/<slug:slug>/', views.demo_by_slug, name='demo_slug'),
+    path('demos/<slug:slug>', views.demo_by_slug),
 ]

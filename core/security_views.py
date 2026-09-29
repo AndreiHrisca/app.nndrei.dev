@@ -26,7 +26,14 @@ def security(request):
         'title': labels.TWO_FACTOR, 'policy': dict(TWO_FACTOR_POLICIES)[policy(request.user)],
         'enabled': confirmed_device(request.user) is not None, 'can_enroll': can_enroll(request.user),
         'can_turn_off': can_turn_off(request.user), 'devices': devices, 'current_device': current.pk if current else None,
-        'days': settings.TRUSTED_DEVICE_DAYS})
+        'days': settings.TRUSTED_DEVICE_DAYS, 'connections': mcp_connections(request.user)})
+
+
+def mcp_connections(user):
+    if user.role != 'admin':
+        return []
+    from .mcp_auth import connections
+    return connections(user)
 
 
 @roles(*ALL_ROLES)

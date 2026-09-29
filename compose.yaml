@@ -26,6 +26,23 @@ services:
       - default
       - edge
     restart: unless-stopped
+  # MCP connector for Claude (Streamable HTTP + OAuth). Caddy sends /mcp and the
+  # OAuth paths here; see docs/fases.md, section 14.
+  mcp:
+    build: .
+    container_name: nndrei-app-mcp
+    command: uvicorn core.mcp_server:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'
+    env_file: .env
+    expose: ['8000']
+    volumes:
+      - private_data:/app/private
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - edge
+    restart: unless-stopped
   worker:
     build: .
     container_name: nndrei-app-worker

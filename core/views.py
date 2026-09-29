@@ -339,6 +339,21 @@ def study(request, public_id):
     return study_card(request, b, item, StudyForm(instance=item))
 
 
+@roles(*STUDY_ROLES)
+@require_POST
+def study_validate(request, public_id):
+    """"Validar estudio": a person has read the AI draft and takes it as theirs."""
+    from django.utils import timezone
+    b = scoped(Business, request.user, public_id)
+    with transaction.atomic():
+        item = Study.objects.visible_to(request.user).select_for_update().filter(business=b).first()
+        if item is not None and item.ai_draft:
+            item.ai_draft, item.validated_by, item.validated_at = False, request.user, timezone.now()
+            item.save(update_fields=['ai_draft', 'validated_by', 'validated_at', 'updated_at'])
+            activity(b, 'study_validated', 'Estudio validado (era un borrador de la IA).', request.user, item, client_visible=False)
+    return study_card(request, b, item) if request.headers.get('HX-Request') else redirect(b)
+
+
 # --- Phone screens -------------------------------------------------------------
 
 @roles('admin', 'developer', 'accountant', 'client')
@@ -362,28 +377,62 @@ def business_note(request, public_id):
 # --- Demo: a self-contained HTML mockup to show the client --------------------
 
 from django.http import HttpResponse
-from .demos import DEMO_HEADERS, delete_demo, has_demo, read_demo, save_demo
+from .demos import DEMO_HEADERS, DemoError, delete_demo, has_demo, latest, qr_png, read_demo, save_demo
 from .forms import DemoForm
 
 
-def demo_context(business):
+def demo_url(business):
     from django.conf import settings
     from django.urls import reverse
-    url = settings.SITE_URL + reverse('demo_public', args=[business.public_id]) if has_demo(business) else ''
-    return {'demo_url': url}
+    from .demos import ensure_slug
+    return settings.SITE_URL + reverse('demo_slug', args=[ensure_slug(business)])
+
+
+def demo_context(business):
+    if not has_demo(business):
+        return {'demo_url': ''}
+    from .models import DemoVersion
+    return {'demo_url': demo_url(business), 'demo_version': latest(business),
+            'demo_versions': DemoVersion.objects.filter(business=business).order_by('-number')[:5]}
+
+
+def serve_demo(business):
+    response = HttpResponse(read_demo(business), content_type='text/html; charset=utf-8')
+    for header, value in DEMO_HEADERS.items():
+        response[header] = value
+    return response
+
+
+def demo_by_slug(request, slug):
+    """The public demo, /demos/<slug>/: no session needed, nothing else of the app reachable.
+
+    A missing slug and a business without a demo are the same 404.
+    """
+    b = Business.objects.filter(demo_slug=slug).first()
+    if b is None or not has_demo(b):
+        raise Http404
+    return serve_demo(b)
 
 
 def demo_public(request, public_id):
-    """The demo itself, reachable without signing in: the UUID is the key.
-
-    A missing business and a business without a demo are the same 404.
-    """
+    """Old address (/clientes/<uuid>/demo-cliente/): links already sent keep working."""
     b = Business.objects.filter(public_id=public_id).first()
     if b is None or not has_demo(b):
         raise Http404
-    response = HttpResponse(read_demo(b), content_type='text/html; charset=utf-8')
-    for header, value in DEMO_HEADERS.items():
-        response[header] = value
+    from django.http import HttpResponsePermanentRedirect
+    return HttpResponsePermanentRedirect(demo_url(b))
+
+
+@roles('admin', 'developer')
+def demo_qr(request, public_id):
+    """QR of the public demo address, as a PNG to download and print or send."""
+    b = scoped(Business, request.user, public_id)
+    if not has_demo(b):
+        raise Http404
+    response = HttpResponse(qr_png(demo_url(b)), content_type='image/png')
+    if request.GET.get('descargar'):
+        response['Content-Disposition'] = f'attachment; filename="qr-{b.demo_slug}.png"'
+    response['Cache-Control'] = 'private, no-store'
     return response
 
 
@@ -395,7 +444,11 @@ def demo_upload(request, public_id):
     if not form.is_valid():
         return render(request, 'core/form.html', {'form': form, 'title': 'Subir demo'}, status=400)
     replacing = has_demo(b)
-    save_demo(b, form.cleaned_data['file'])
+    try:
+        save_demo(b, form.cleaned_data['file'], request.FILES['file'].name, request.user)
+    except DemoError as exc:
+        form.add_error('file', str(exc))
+        return render(request, 'core/form.html', {'form': form, 'title': 'Subir demo'}, status=400)
     activity(b, 'demo_uploaded', 'Demo reemplazada.' if replacing else 'Demo subida.', request.user, client_visible=False)
     messages.success(request, 'Demo reemplazada.' if replacing else 'Demo subida.')
     return redirect(b)
