@@ -52,7 +52,7 @@ def demo(db):
         ('Clínica Dental Sonrisas', 'Clínicas dentales', 'found', '', 'Calle Arroyo Bueno 3'),
         ('Café Central', 'Cafeterías', 'profile_created', '633 444 555', ''),
         ('Gimnasio Fuerza Sur', 'Gimnasios', 'development', '644 555 666', 'Paseo de Alberto Palacios 20'),
-        ('Bar La Parada', 'Bares', 'review', '655 666 777', 'Calle Villaverde 9'),
+        ('Bar La Parada', 'Bares', 'proposal', '655 666 777', 'Calle Villaverde 9'),
         ('Barbería Vintage 1985', 'Peluquerías', 'approved', '666 777 888', ''),
         ('Cafetería Los Porches', 'Cafeterías', 'testing', '677 888 999', 'Plaza Mayor de Villaverde 1'),
         ('Taller Rápido Express', 'Talleres', 'discarded', '', ''),
@@ -214,7 +214,8 @@ def test_phone_interactions(browser, client, live_server, demo):
     assert page.locator(f'#pipeline-list {cards}').count() == 9
     page.locator('.stage-tile.proposal').click()
     page.wait_for_selector('.stage-tile.proposal.is-active')
-    assert page.locator(f'#pipeline-list {cards}').count() == 1 and 'stage=proposal' in page.url
+    # Two businesses: one was «Propuesta enviada» and the other «Cambios en la propuesta», now both «Propuesta».
+    assert page.locator(f'#pipeline-list {cards}').count() == 2 and 'stage=proposal' in page.url
     page.locator('.stage-tile.proposal').click()
     page.wait_for_selector('.stage-tile.proposal:not(.is-active)')
     assert page.locator(f'#pipeline-list {cards}').count() == 9

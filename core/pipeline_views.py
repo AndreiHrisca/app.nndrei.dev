@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count,F,Min,Prefetch,Q
+from django.db.models import Count,F,Min,OuterRef,Prefetch,Q,Subquery
 from django.db.models.functions import Least
 from django.http import HttpResponse
 from django.shortcuts import redirect,render
@@ -13,7 +13,7 @@ from django.views.decorators.http import require_POST
 from . import labels
 from .access import scoped
 from .auth_views import roles
-from .models import Business,STAGES,FollowUp,Visit,SearchRun,SearchZone,SearchCategory,PlaceSnapshot,PlacesUsage
+from .models import Business,Estimation,STAGES,FollowUp,Visit,SearchRun,SearchZone,SearchCategory,PlaceSnapshot,PlacesUsage
 from .forms import BusinessForm,FollowUpForm
 from .services import transition_business,activity,STAGE_TRANSITIONS
 
@@ -27,12 +27,15 @@ def pipeline(request):
     active=bs.exclude(stage='discarded')
     if stage: active=active.filter(stage=stage)
     pending=FollowUp.objects.filter(done=False).select_related('owner').order_by('date','pk')
+    # The latest estimate of each business, read in the same query as the list.
+    latest=Estimation.objects.filter(business=OuterRef('pk')).order_by('-created_at','-pk')
     # Nearest next step first (pending follow-up or the card's own next action); undated last.
     active=(active.annotate(next_date=Least(Min('followup__date',filter=Q(followup__done=False)),F('next_action_date')))
+            .annotate(estimate_monthly=Subquery(latest.values('monthly_mid')[:1]),estimate_budget=Subquery(latest.values('suggested_budget')[:1]))
             .order_by(F('next_date').asc(nulls_last=True),F('stage_changed_at').desc(nulls_last=True),'pk')
             .select_related('category')
             .prefetch_related(Prefetch('followup_set',queryset=pending,to_attr='pending_followups'),'assignments__developer'))
-    return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES],'followups':FollowUp.objects.visible_to(request.user).filter(done=False).exclude(business__stage='discarded').select_related('business','owner').order_by('date','pk')[:20],'today':timezone.localdate()})
+    return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES],'today':timezone.localdate()})
 
 @roles('admin')
 @require_POST

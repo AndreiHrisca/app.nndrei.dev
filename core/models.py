@@ -16,8 +16,10 @@ ROLES = list(labels.ROLE_LABELS.items())
 # filters, the table sorting and STAGE_TRANSITIONS all read their order from here.
 # 'discarded' stays last on purpose: it is a way out, not a step.
 # Visible names come from core.labels.
-STAGES = [(key, labels.STAGE_LABELS[key]) for key in ['found', 'profile_created', 'visited', 'proposal', 'review', 'approved', 'development', 'testing', 'production', 'discarded']]
+STAGES = [(key, labels.STAGE_LABELS[key]) for key in ['found', 'profile_created', 'demo_ready', 'visited', 'proposal', 'approved', 'development', 'testing', 'production', 'discarded']]
 STAGE_ORDER = {key: index for index, (key, _) in enumerate(STAGES)}
+# The stage history is immutable, so it keeps accepting (and naming) retired stages.
+STAGE_HISTORY_CHOICES = STAGES + list(labels.LEGACY_STAGE_LABELS.items())
 
 class PublicIdModel(models.Model):
     """Adds an opaque identifier for URLs so the integer primary key never leaves the server."""
@@ -267,8 +269,8 @@ class ActivityEvent(BusinessOwned):
         raise ValueError('Audit records cannot be deleted.')
 
 class StageChange(BusinessOwned):
-    from_stage = models.CharField(max_length=30,choices=STAGES)
-    to_stage = models.CharField(max_length=30,choices=STAGES)
+    from_stage = models.CharField(max_length=30,choices=STAGE_HISTORY_CHOICES)
+    to_stage = models.CharField(max_length=30,choices=STAGE_HISTORY_CHOICES)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
     occurred_at = models.DateTimeField(default=timezone.now)
     objects = ImmutableQuerySet.as_manager()

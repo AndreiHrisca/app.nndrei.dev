@@ -25,15 +25,20 @@ def in_progress_count(count):
 STAGE_LABELS = {
     'found': 'Encontrado',
     'profile_created': 'Estudiado',
+    'demo_ready': 'Demo lista',
     'visited': 'Visitado',
-    'proposal': 'Propuesta enviada',
-    'review': 'Cambios en la propuesta',
+    'proposal': 'Propuesta',
     'approved': 'Aprobado',
     'development': 'En construcción',
     'testing': 'Revisión final',
     'production': 'Web publicada',
     'discarded': 'Descartado',
 }
+
+
+# Stages that no longer exist but still appear in the immutable stage history.
+# "Cambios en la propuesta" was merged into "Propuesta" (a repeatable step).
+LEGACY_STAGE_LABELS = {'review': 'Cambios en la propuesta'}
 
 
 def stage_activity(stage):

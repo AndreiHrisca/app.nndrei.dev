@@ -41,11 +41,14 @@ from django.db.models import Max
 from .models import Business, StageChange, STAGES, Proposal, ProposalVersion, ProposalLine, ProposalSequence
 
 STAGE_TRANSITIONS = {a[0]:{b[0]} for a,b in zip(STAGES[:8],STAGES[1:9])}
-STAGE_TRANSITIONS['proposal'] = {'review'}
-STAGE_TRANSITIONS['review'] = {'proposal'}
+# A visit does not need a demo first.
+STAGE_TRANSITIONS['profile_created'].add('visited')
+# "Propuesta" repeats (send, changes, new version) and ends with the client's
+# acceptance, recorded on the proposal itself: there is no manual step onwards.
+STAGE_TRANSITIONS['proposal'] = set()
 STAGE_TRANSITIONS['production'] = set()
 STAGE_TRANSITIONS['discarded'] = set()
-for stage in ['found','visited','profile_created','proposal','review']:
+for stage in ['found','profile_created','demo_ready','visited','proposal']:
     STAGE_TRANSITIONS[stage].add('discarded')
 
 @transaction.atomic
@@ -54,7 +57,7 @@ def transition_business(user,public_id,target,reason='',accepting=False):
     if user.role!='admin' and not accepting:
         from django.http import Http404
         raise Http404
-    approval=accepting and target=='approved' and b.stage in {'proposal','review'}
+    approval=accepting and target=='approved' and b.stage=='proposal'
     if not approval and target not in STAGE_TRANSITIONS.get(b.stage,set()):
         raise ValidationError('Transición de fase no permitida.')
     if target=='discarded' and not reason.strip():
@@ -109,13 +112,13 @@ def proposal_action(user,public_id,action,comment='',ip=None,expected_version=No
         if version.sent_at or version.historical_status or proposal.status!='draft' or not version.lines.exists():
             raise ValidationError('La versión debe ser un borrador con líneas.')
         # 'visited' is the step just before 'proposal': a proposal follows a visit.
-        if proposal.business.stage not in {'visited','proposal','review','production','development','testing','approved'}:
+        if proposal.business.stage not in {'visited','proposal','production','development','testing','approved'}:
             raise ValidationError('Visita el negocio antes de enviar una propuesta.')
         if not client_emails(proposal.business):
             raise ValidationError('Añade el email del negocio o invita al cliente antes de enviar.')
         version.sent_at=timezone.now()
         proposal.status='sent'
-        if proposal.business.stage in {'visited','review'}:
+        if proposal.business.stage=='visited':
             transition_business(user,proposal.business.public_id,'proposal')
         from django.core import signing
         token=signing.dumps({'version':version.pk},salt='proposal-public')
@@ -136,14 +139,9 @@ def proposal_action(user,public_id,action,comment='',ip=None,expected_version=No
             version.accepted_by=user
             version.acceptance_method='admin_recorded' if user.role=='admin' else 'portal'
             version.acceptance_ip=ip
-            if proposal.business.stage in {'proposal','review'}:
+            if proposal.business.stage=='proposal':
                 transition_business(user,proposal.business.public_id,'approved',accepting=True)
-        elif action=='changes' and proposal.business.stage=='proposal':
-            # The client decision authorizes the corresponding commercial transition.
-            b=Business.objects.select_for_update().get(pk=proposal.business_id)
-            StageChange.objects.create(business=b,from_stage=b.stage,to_stage='review',actor=user)
-            b.stage='review'; b.stage_changed_at=timezone.now(); b.save()
-            activity(b,'stage_changed',labels.stage_activity('review'),user,b)
+        # Changes asked for: the business stays in «Propuesta», the repeatable step.
         text='Propuesta '+proposal.number+': '+proposal.get_status_display()
         transaction.on_commit(lambda: notify(text,[settings.ADMIN_EMAIL],comment or text,settings.SITE_URL+proposal.get_absolute_url()))
     else:

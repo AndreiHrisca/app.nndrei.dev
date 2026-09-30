@@ -178,3 +178,17 @@ Resultado: **829 pruebas superadas** + prueba de navegador de la tarjeta (`393-a
 Comprobado: 19 pruebas (herramientas una a una y el flujo entero de Claude.ai con registro, autorización, consentimiento, token, `initialize`, `tools/list`, `tools/call`, error de validación, rotación del refresh y desconexión) y arranque real con Uvicorn: metadatos OAuth con `issuer` `https://app.nndrei.dev` y `/mcp` sin token → 401 con `resource_metadata`.
 
 Resultado: **876 pruebas superadas** + 6 de navegador; `makemigrations --check` y `manage.py check` sin incidencias.
+
+## 15. Embudo v2: «Propuesta», «Demo lista» y estimación en Seguimiento
+
+**Fases.** 01 Encontrado, 02 Estudiado, 03 Demo lista, 04 Visitado, 05 Propuesta (↻, se repite), 06 Aprobado, 07 En construcción, 08 Revisión final, 09 Web publicada; «Descartado» sigue fuera del embudo. «Propuesta enviada» y «Cambios en la propuesta» se funden en «Propuesta» (clave `proposal`; `review` desaparece). «Demo lista» (`demo_ready`, color melocotón `--peach`) significa estudio y demo hechos, solo falta visitar.
+
+Transiciones: Estudiado → Demo lista o directamente Visitado (visitar no exige demo); Demo lista → Visitado; «He ido» sigue llevando a Visitado desde cualquier fase anterior. Pedir cambios en una propuesta ya no mueve de fase: el negocio sigue en «Propuesta» hasta que se acepta (→ Aprobado). Se puede descartar desde Encontrado, Estudiado, Demo lista, Visitado y Propuesta.
+
+**Migración `0022`.** Quien esté en `review` pasa a `proposal`; quien esté en Estudiado y ya tenga demo (una `DemoVersion` o el archivo único de antes) pasa a «Demo lista». Estos movimientos no se anotan en el historial de fases porque una migración no tiene a nadie que los firme. El historial es inmutable, así que las filas antiguas conservan «Cambios en la propuesta» (`LEGACY_STAGE_LABELS`).
+
+**MCP.** `subir_demo` pasa a «Demo lista» un negocio en Encontrado o Estudiado (con su `StageChange` y entrada en el historial), nunca hacia atrás, y devuelve la fase. `buscar_clientes` lista las fases nuevas y acepta «Propuesta enviada» y «Cambios en la propuesta» como «Propuesta». Subir una demo desde la web no mueve de fase (el encargo lo pedía en la herramienta MCP).
+
+**Seguimiento.** Sin el panel «Próximas acciones»: la tabla ocupa todo el ancho. Columnas: Negocio, Fase, Siguiente paso, Estimación de facturación («11.706 €/mes»), Presupuesto sugerido («1.000 €»), Actualizado; sin estimación, «—» en gris. La última estimación se lee con dos subconsultas en la misma consulta de la lista (el número de consultas no crece con las filas). Importes a la derecha con cifras tabulares; la tabla hace scroll horizontal dentro de su tarjeta. «✓ Hecha» pasa del panel a la celda «Siguiente paso», para que una acción vencida se pueda cerrar. En el móvil, cada tarjeta añade la línea de la estimación.
+
+Resultado: **899 pruebas superadas** + 6 de navegador; `makemigrations --check` y `manage.py check` sin incidencias.

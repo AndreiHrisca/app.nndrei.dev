@@ -89,19 +89,20 @@ def test_date_without_next_step_is_rejected(sign_in, businesses):
     assert not Visit.objects.exists()
 
 
-def test_overdue_actions_stand_out_in_order(sign_in, accounts, businesses):
+def test_overdue_actions_stand_out_in_the_next_step_column(sign_in, accounts, businesses):
     b = businesses[0]; b.stage = 'visited'; b.save()
     today = timezone.localdate()
     FollowUp.objects.create(business=b, description='Futura', date=today + timedelta(days=2), owner=accounts['admin'], kind='call')
-    FollowUp.objects.create(business=b, description='Atrasada', date=today - timedelta(days=2), owner=accounts['admin'], kind='call')
-    FollowUp.objects.create(business=b, description='Para hoy', date=today, owner=accounts['admin'], kind='call')
+    late = FollowUp.objects.create(business=b, description='Atrasada', date=today - timedelta(days=2), owner=accounts['admin'], kind='call')
     page = sign_in('admin').get('/').content.decode()
-    panel = page[page.index('Próximas acciones'):]
-    assert panel.index('Atrasada') < panel.index('Para hoy') < panel.index('Futura')
-    assert 'followup is-overdue' in panel and 'Vencida · </span>Atrasada' in panel
-    # The pipeline column shows the nearest step, flagged as overdue.
-    table = page[:page.index('Próximas acciones')]
-    assert 'Atrasada' in table and 'is-overdue' in table
+    assert 'Próximas acciones' not in page  # The side panel is gone.
+    table = page[page.index('<table class="pipeline-table">'):page.index('</table>')]
+    # The nearest pending step is shown, flagged, with a way to mark it done.
+    assert 'Atrasada' in table and 'Futura' not in table and 'is-overdue' in table and 'Vencida · ' in table
+    assert f'/seguimiento/{late.public_id}/hecho/' in table
+    sign_in('admin').post(f'/seguimiento/{late.public_id}/hecho/')
+    table = sign_in('admin').get('/').content.decode()
+    assert 'Futura' in table and 'Atrasada' not in table
 
 
 def test_discarded_are_hidden_by_default_and_listed_on_request(sign_in, businesses):

@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from django import template
 register = template.Library()
 
@@ -18,6 +18,15 @@ def eur_short(value):
     except (TypeError, ValueError, InvalidOperation):
         return DASH
     return f'{amount:,.0f}'.replace(',', '.') + ' €'
+
+@register.filter
+def eur_mes(value):
+    """Monthly amount, rounded to euros: 11706.4 -> "11.706 €/mes"; nothing -> "—"."""
+    try:
+        amount = Decimal(value).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    except (TypeError, ValueError, InvalidOperation):
+        return DASH
+    return f'{amount:,.0f}'.replace(',', '.') + ' €/mes'
 
 @register.filter
 def miles(value):

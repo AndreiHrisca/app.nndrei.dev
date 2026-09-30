@@ -78,12 +78,13 @@ def test_stage_row_is_an_ordered_list_with_decorative_arrows(sign_in,businesses)
     assert 'stage-arrow' not in row[row.rindex('<li class="stage-step">'):]
     assert 'stroke-dasharray' in row and '↻' in row
 
-NEW_ORDER=['Encontrado','Estudiado','Visitado','Propuesta enviada','Cambios en la propuesta','Aprobado','En construcción','Revisión final','Web publicada','Descartado']
+NEW_ORDER=['Encontrado','Estudiado','Demo lista','Visitado','Propuesta','Aprobado','En construcción','Revisión final','Web publicada','Descartado']
 
 def test_stage_order_is_defined_once():
     from core.models import STAGES,STAGE_ORDER
     assert [label for _,label in STAGES]==NEW_ORDER
-    assert STAGE_ORDER['profile_created']<STAGE_ORDER['visited']<STAGE_ORDER['proposal']
+    assert STAGE_ORDER['profile_created']<STAGE_ORDER['demo_ready']<STAGE_ORDER['visited']<STAGE_ORDER['proposal']
+    assert 'review' not in STAGE_ORDER
 
 def test_pipeline_tiles_follow_the_new_order(sign_in,businesses):
     import re
@@ -101,8 +102,12 @@ def test_selects_follow_the_new_order(sign_in,businesses):
 def test_transitions_follow_the_new_order():
     from core.services import STAGE_TRANSITIONS
     assert STAGE_TRANSITIONS['found']=={'profile_created','discarded'}
-    assert STAGE_TRANSITIONS['profile_created']=={'visited','discarded'}
+    # A visit does not need a demo first.
+    assert STAGE_TRANSITIONS['profile_created']=={'demo_ready','visited','discarded'}
+    assert STAGE_TRANSITIONS['demo_ready']=={'visited','discarded'}
     assert STAGE_TRANSITIONS['visited']=={'proposal','discarded'}
+    # «Propuesta» repeats and ends with the client's acceptance, not a manual move.
+    assert STAGE_TRANSITIONS['proposal']=={'discarded'}
 
 def test_visit_now_follows_the_study(sign_in,accounts,businesses):
     from datetime import datetime
@@ -127,5 +132,5 @@ def test_visible_wording_comes_from_labels(client, django_user_model):
     assert dict(STAGES)['production'] == 'Web publicada' and dict(STAGES)['profile_created'] == 'Estudiado'
     assert dict(ROLES)['developer'] == 'Desarrollador'
     assert dict(REQUEST_STATES)['production'] == 'Publicada'
-    assert labels.stage_activity('review') == 'Fase: Cambios en la propuesta'
+    assert labels.stage_activity('proposal') == 'Fase: Propuesta'
     assert labels.in_progress_count(3) == '3 en marcha'

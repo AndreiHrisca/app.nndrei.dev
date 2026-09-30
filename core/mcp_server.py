@@ -70,11 +70,13 @@ async def run(tool, *args):
 ClienteId = Annotated[str, Field(description='El «id» del cliente tal como lo devuelven buscar_clientes o crear_cliente.')]
 
 
-@mcp.tool(description='Busca clientes (negocios) por texto en el nombre, la dirección o la zona, y opcionalmente por fase '
-                      '(Encontrado, Estudiado, Visitado, Propuesta enviada, Cambios en la propuesta, Aprobado, En construcción, '
-                      'Revisión final, Web publicada o Descartado). Sin fase no devuelve los descartados. Máximo 50 resultados.')
+@mcp.tool(description='Busca clientes (negocios) por texto en el nombre, la dirección o la zona, y opcionalmente por fase: '
+                      'Encontrado, Estudiado, Demo lista, Visitado, Propuesta, Aprobado, En construcción, Revisión final, '
+                      'Web publicada o Descartado. Sin fase no devuelve los descartados. Máximo 50 resultados.')
 async def buscar_clientes(texto: Annotated[str | None, Field(description='Texto a buscar. Vacío: todos.')] = None,
-                          estado: Annotated[str | None, Field(description='Fase del seguimiento, por su nombre.')] = None) -> dict:
+                          estado: Annotated[str | None, Field(description='Fase del seguimiento, por su nombre: Encontrado, Estudiado, Demo lista, '
+                                                                          'Visitado, Propuesta, Aprobado, En construcción, Revisión final, '
+                                                                          'Web publicada o Descartado.')] = None) -> dict:
     return await run(mcp_tools.buscar_clientes, texto, estado)
 
 
@@ -112,7 +114,8 @@ async def guardar_fuentes(cliente_id: ClienteId,
 
 @mcp.tool(description='Publica una web de muestra para el cliente: un único archivo HTML autocontenido (estilos y scripts dentro, '
                       'UTF-8, máx. 5 MB). Cada subida es una versión nueva y la última se ve en una dirección pública fija por '
-                      'cliente (/demos/<slug>/), sin acceso al resto de la app. Devuelve esa dirección.')
+                      'cliente (/demos/<slug>/), sin acceso al resto de la app. Si el cliente está en «Encontrado» o «Estudiado», pasa '
+                      'a «Demo lista» (estudio y demo hechos, falta visitarlo); nunca retrocede. Devuelve la dirección y la fase.')
 async def subir_demo(cliente_id: ClienteId,
                      nombre_archivo: Annotated[str, Field(description='Nombre del archivo, terminado en .html.')],
                      html: Annotated[str, Field(description='El documento HTML completo.')]) -> dict:

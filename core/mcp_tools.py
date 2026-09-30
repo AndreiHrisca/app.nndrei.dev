@@ -15,7 +15,7 @@ from django.db.models import Q
 from django.utils import timezone
 from . import labels
 from .access import visible_queryset
-from .models import Business, Estimation, PlaceSnapshot, STAGES, Study
+from .models import Business, Estimation, PlaceSnapshot, STAGE_ORDER, STAGES, StageChange, Study
 from .services import activity
 
 MAX_TEXT = 5000
@@ -83,14 +83,33 @@ def record(business, user, kind, message, obj=None):
     activity(business, 'mcp_' + kind, 'Claude: ' + message, user, obj, client_visible=False)
 
 
+# The two proposal stages were merged into «Propuesta»: their old names still work.
+STAGE_ALIASES = {'propuesta enviada': 'proposal', 'cambios en la propuesta': 'proposal', 'review': 'proposal'}
+
+
 def stage_key(estado):
     if not estado:
         return None
+    if not isinstance(estado, str):
+        raise ToolError('"estado" debe ser el nombre de una fase.')
     wanted = estado.strip().lower()
     for key, label in STAGES:
         if wanted in (key, label.lower()):
             return key
+    if wanted in STAGE_ALIASES:
+        return STAGE_ALIASES[wanted]
     raise ToolError('Estado desconocido. Usa uno de: ' + ', '.join(label for _, label in STAGES) + '.')
+
+
+def move_to_demo_ready(business, user):
+    """A demo on a found or studied business means only the visit is missing. Never moves back."""
+    if STAGE_ORDER[business.stage] >= STAGE_ORDER['demo_ready']:
+        return False
+    StageChange.objects.create(business=business, from_stage=business.stage, to_stage='demo_ready', actor=user)
+    business.stage, business.stage_changed_at = 'demo_ready', timezone.now()
+    business.save(update_fields=['stage', 'stage_changed_at'])
+    activity(business, 'stage_changed', labels.stage_activity('demo_ready'), user, business, client_visible=False)
+    return True
 
 
 def summary(business):
@@ -276,7 +295,9 @@ def subir_demo(user, cliente_id, nombre_archivo, html):
             raise ToolError(str(exc))
         url = demo_url(b)
         record(b, user, 'demo', f'{labels.DEMO_LOWER} publicada (versión {version.number}).', version)
-    return {'id': str(b.public_id), 'url': url, 'version': version.number, 'bytes': version.size}
+        moved = move_to_demo_ready(b, user)
+    return {'id': str(b.public_id), 'url': url, 'version': version.number, 'bytes': version.size,
+            'fase': b.get_stage_display(), 'fase_cambiada': moved}
 
 
 def estimation_input(datos):
