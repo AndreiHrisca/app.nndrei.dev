@@ -389,3 +389,14 @@ def test_mcp_descriptions_mention_city_and_neighbourhood():
     schema = tools_by_name['buscar_clientes'].input_schema['properties']
     assert {'texto', 'estado', 'ciudad', 'barrio'} <= set(schema)
     assert 'ciudad' in tools_by_name['crear_cliente'].description.lower() and 'barrio' in tools_by_name['get_cliente'].description.lower()
+
+
+def test_google_coordinates_also_set_the_neighbourhood(sign_in, settings, area):
+    settings.GOOGLE_PLACES_API_KEY = 'test'
+    b = Business.objects.create(name='Sin sitio', city=area.city, google_place_id='g-77')
+    response = mock.Mock()
+    response.json.return_value = {'id': 'g-77', 'location': {'latitude': 40.401, 'longitude': -3.701}}
+    with mock.patch('core.places.requests.get', return_value=response):
+        sign_in('admin').post(f'/clientes/{b.public_id}/actualizar-google/')
+    b.refresh_from_db()
+    assert b.latitude == 40.401 and b.neighbourhood == area.neighbourhood

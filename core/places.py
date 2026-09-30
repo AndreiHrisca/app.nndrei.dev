@@ -83,6 +83,9 @@ def apply_google(business,place,now=None):
         business.hours_updated_at=now
     business.google_fetched_at=now
     business.save()
+    # New coordinates may mean another neighbourhood.
+    from .geo_sources import place_business
+    place_business(business)
 
 def apply_snapshot(business,snapshot):
     """Carry what the search already fetched onto a business being captured."""
