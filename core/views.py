@@ -51,6 +51,8 @@ def business_create(request):
     if request.method == 'POST' and form.is_valid():
         item = form.save()
         activity(item,'created','Ficha de negocio creada.',request.user,client_visible=False)
+        from .geo_sources import queue_placing
+        queue_placing(item)
         return redirect(item)
     return render(request,'core/form.html',{'form':form,'title':labels.NEW_BUSINESS_TITLE})
 
@@ -94,7 +96,13 @@ def business_edit(request,public_id):
     b = scoped(Business,request.user,public_id)
     form = BusinessForm(request.POST or None,instance=b)
     if request.method == 'POST' and form.is_valid():
-        form.save()
+        item = form.save(commit=False)
+        if 'address' in form.changed_data and item.latitude is None:
+            item.geocoded_at = None  # A new address deserves one new lookup.
+        item.save()
+        if 'address' in form.changed_data or item.city_id is None:
+            from .geo_sources import queue_placing
+            queue_placing(item)
         return redirect(b)
     return render(request,'core/form.html',{'form':form,'title':'Editar '+b.name})
 
@@ -225,7 +233,7 @@ def business_list_context(request):
     snapshots = PlaceSnapshot.objects.filter(business=OuterRef('pk')).order_by('-fetched_at')
     versions = ProposalVersion.objects.filter(proposal__business=OuterRef('pk')).order_by('-proposal_id', '-number')
     items = (Business.objects.visible_to(request.user)
-             .select_related('category')
+             .select_related('category', 'city', 'neighbourhood')
              .annotate(
                  last_activity=Subquery(ActivityEvent.objects.filter(business=OuterRef('pk')).order_by('-occurred_at', '-pk').values('occurred_at')[:1]),
                  has_snapshot=Exists(PlaceSnapshot.objects.filter(business=OuterRef('pk'))),

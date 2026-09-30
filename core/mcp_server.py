@@ -70,24 +70,28 @@ async def run(tool, *args):
 ClienteId = Annotated[str, Field(description='El «id» del cliente tal como lo devuelven buscar_clientes o crear_cliente.')]
 
 
-@mcp.tool(description='Busca clientes (negocios) por texto en el nombre, la dirección o la zona, y opcionalmente por fase: '
+@mcp.tool(description='Busca clientes (negocios) por texto en el nombre o la dirección, por ciudad, por barrio y por fase: '
                       'Encontrado, Estudiado, Demo lista, Visitado, Propuesta, Aprobado, En construcción, Revisión final, '
-                      'Web publicada o Descartado. Sin fase no devuelve los descartados. Máximo 50 resultados.')
-async def buscar_clientes(texto: Annotated[str | None, Field(description='Texto a buscar. Vacío: todos.')] = None,
+                      'Web publicada o Descartado. Ciudad y barrio se buscan por nombre, sin distinguir mayúsculas ni tildes. '
+                      'Sin fase no devuelve los descartados. Cada cliente lleva su ciudad, provincia y barrio. Máximo 50 resultados.')
+async def buscar_clientes(texto: Annotated[str | None, Field(description='Texto a buscar en el nombre o la dirección (también encuentra las zonas antiguas, como «Villaverde Bajo»). Vacío: todos.')] = None,
                           estado: Annotated[str | None, Field(description='Fase del seguimiento, por su nombre: Encontrado, Estudiado, Demo lista, '
                                                                           'Visitado, Propuesta, Aprobado, En construcción, Revisión final, '
-                                                                          'Web publicada o Descartado.')] = None) -> dict:
-    return await run(mcp_tools.buscar_clientes, texto, estado)
+                                                                          'Web publicada o Descartado.')] = None,
+                          ciudad: Annotated[str | None, Field(description='Municipio, por ejemplo «Madrid» o «Móstoles».')] = None,
+                          barrio: Annotated[str | None, Field(description='Barrio dentro de la ciudad, por ejemplo «Sol» o «San Cristóbal».')] = None) -> dict:
+    return await run(mcp_tools.buscar_clientes, texto, estado, ciudad, barrio)
 
 
-@mcp.tool(description='Devuelve la ficha completa de un cliente: datos de contacto, fase, datos de Google, horario, el estudio '
+@mcp.tool(description='Devuelve la ficha completa de un cliente: datos de contacto, ciudad y barrio, fase, datos de Google, horario, el estudio '
                       'previo (con si es borrador de la IA y sus fuentes), la web de muestra si existe y la última estimación.')
 async def get_cliente(id: ClienteId) -> dict:
     return await run(mcp_tools.get_cliente, id)
 
 
-@mcp.tool(description='Crea la ficha de un negocio nuevo en la fase «Encontrado». Si ya existe uno con ese place_id de Google, '
-                      'devuelve el existente (ya_existia: true) en vez de duplicarlo.')
+@mcp.tool(description='Crea la ficha de un negocio nuevo en la fase «Encontrado». La ciudad y el barrio se asignan solos a partir '
+                      'del place_id (si el negocio salió en una búsqueda) o de la dirección. Si ya existe uno con ese place_id de '
+                      'Google, devuelve el existente (ya_existia: true) en vez de duplicarlo.')
 async def crear_cliente(nombre: Annotated[str, Field(description='Nombre comercial del negocio.', max_length=200)],
                         direccion: Annotated[str, Field(description='Dirección postal completa.', max_length=300)],
                         place_id: Annotated[str | None, Field(description='Id de Google Places, si lo conoces.')] = None) -> dict:

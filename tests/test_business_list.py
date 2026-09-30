@@ -2,7 +2,7 @@
 from datetime import date, timedelta
 import pytest
 from django.utils import timezone
-from core.models import ActivityEvent, Business, PlaceSnapshot, Proposal, ProposalVersion, SearchCategory, SearchZone
+from core.models import ActivityEvent, Business, PlaceSnapshot, Proposal, ProposalVersion, SearchCategory
 
 pytestmark = pytest.mark.django_db
 
@@ -10,16 +10,18 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def catalogue(accounts, businesses):
     own, other = businesses
-    zone = SearchZone.objects.create(name='Villaverde', latitude=40.4, longitude=-3.7)
     bares = SearchCategory.objects.create(name='Bares', color='yellow')
     peluquerias = SearchCategory.objects.create(name='Peluquerías', color='pink')
-    own.category, own.phone, own.zone = bares, '600 123 456', 'Villaverde'
+    from core.models import City, Neighbourhood
+    madrid = City.objects.get(ine_code='28079')
+    villaverde = Neighbourhood.objects.create(city=madrid, name='Villaverde', search_name='villaverde', source='madrid', external_id='V', bbox=[40.3, -3.8, 40.4, -3.6], latitude=40.35, longitude=-3.7)
+    own.category, own.phone, own.city, own.neighbourhood = bares, '600 123 456', madrid, villaverde
     own.next_action, own.next_action_date = 'Llamar a Santiago', date(2026, 10, 1)
     own.stage = 'proposal'
     own.save()
     other.category = peluquerias
     other.save()
-    PlaceSnapshot.objects.create(place_id='snap', name=own.name, zone=zone, category=bares, rating=4.7, reviews=1960, photos=9, has_website=True, business=own, status='pipeline')
+    PlaceSnapshot.objects.create(place_id='snap', name=own.name, category=bares, rating=4.7, reviews=1960, photos=9, has_website=True, business=own, status='pipeline')
     ActivityEvent.objects.create(business=own, kind='test', text='Algo pasó', occurred_at=timezone.now() - timedelta(days=2))
     proposal = Proposal.objects.create(business=own, number='P-2026-LIST')
     ProposalVersion.objects.create(proposal=proposal, number=1, development_total=1500)

@@ -30,3 +30,31 @@ def sign_in(client, accounts):
 def test_settings(settings):
     settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
     settings.STORAGES = {'default': {'BACKEND': 'django.core.files.storage.InMemoryStorage'}, 'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}}
+
+
+@pytest.fixture(autouse=True)
+def no_geo_network(monkeypatch):
+    """No test reaches INE, Madrid or OpenStreetMap unless it mocks them itself."""
+    from core import geo_sources
+
+    def offline(*args, **kwargs):
+        raise geo_sources.GeoError('Sin red en las pruebas.')
+    for name in ['download', 'nominatim', 'overpass']:
+        monkeypatch.setattr(geo_sources, name, offline)
+
+
+SQUARE = [[-3.705, 40.395], [-3.695, 40.395], [-3.695, 40.405], [-3.705, 40.405], [-3.705, 40.395]]
+
+
+@pytest.fixture
+def area(db):
+    """A small test neighbourhood in Madrid (one search cell) as an active search area."""
+    from django.utils import timezone
+    from core.models import City, Neighbourhood, SearchArea
+    madrid = City.objects.get(ine_code='28079')
+    madrid.neighbourhoods_fetched_at = timezone.now()
+    madrid.save()
+    barrio = Neighbourhood.objects.create(city=madrid, name='Barrio de Prueba', search_name='barrio de prueba', source='madrid', external_id='T1',
+                                          bbox=[40.395, -3.705, 40.405, -3.695], geometry={'type': 'Polygon', 'coordinates': [SQUARE]},
+                                          latitude=40.4, longitude=-3.7)
+    return SearchArea.objects.create(city=madrid, neighbourhood=barrio, active=True)

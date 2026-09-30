@@ -10,8 +10,8 @@ from .services import activity
 
 
 def destination(business):
-    """What to navigate to when there are no coordinates: the address, or name and zone."""
-    return business.address or ' '.join(x for x in [business.name, business.zone] if x)
+    """What to navigate to when there are no coordinates: the address, or name and place."""
+    return business.address or ' '.join(x for x in [business.name, business.area_label] if x)
 
 
 def directions(business):

@@ -339,3 +339,16 @@ table.clients td.cell-name{background:var(--surface)}
 .next-step form{flex-shrink:0}
 .lc-money{font-variant-numeric:tabular-nums;font-weight:700}
 .pipeline-table td:nth-child(3){min-width:260px}
+
+/* "Buscar clientes": city autocomplete, neighbourhood, area panel. */
+.city-picker{position:relative;min-width:220px}
+.city-options{position:absolute;z-index:20;left:0;right:0;top:100%;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(24,24,27,.14);max-height:320px;overflow:auto}
+.city-options:empty{display:none}
+.city-option{display:block;width:100%;text-align:left;background:#fff;color:var(--text);border:0;border-bottom:1px solid var(--divider);border-radius:0;box-shadow:none;min-height:44px;padding:10px 14px;font-weight:600}
+.city-option:hover,.city-option:focus-visible{background:var(--inset)}
+.city-empty{padding:10px 14px;margin:0}
+.barrio-slot small{display:block;margin-top:4px}
+.area-panel{background:#fff;border:1px solid var(--border);border-radius:20px;padding:16px 20px;margin-bottom:24px}
+.area-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.area-panel .actions form{margin:0}
+.m-sheet .city-options{position:static;box-shadow:none;border:1px solid var(--border);margin-top:4px}

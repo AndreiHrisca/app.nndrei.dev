@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from core import mcp_tools as tools
 from core.mcp_tools import ToolError
-from core.models import ActivityEvent, Business, DemoVersion, Estimation, McpToken, PlaceSnapshot, SearchCategory, SearchZone, Study
+from core.models import ActivityEvent, Business, DemoVersion, Estimation, McpToken, PlaceSnapshot, SearchCategory, Study
 
 pytestmark = pytest.mark.django_db
 
@@ -52,9 +52,9 @@ def test_get_cliente_and_bad_ids(admin, businesses):
 
 
 def test_create_is_idempotent_by_place_id_and_links_the_search_result(admin):
-    zone = SearchZone.objects.create(name='Centro', latitude=40.4, longitude=-3.7)
+    from core.models import City
     category = SearchCategory.objects.create(name='Bares')
-    snapshot = PlaceSnapshot.objects.create(place_id='ChIJ_abc', name='Bar', zone=zone, category=category, phone='600', latitude=40.41, longitude=-3.71)
+    snapshot = PlaceSnapshot.objects.create(place_id='ChIJ_abc', name='Bar', city=City.objects.get(ine_code='28079'), category=category, phone='600', latitude=40.41, longitude=-3.71)
     first = tools.crear_cliente(admin, 'Bar Pepe', 'Calle Mayor 1', 'ChIJ_abc')
     again = tools.crear_cliente(admin, 'Otro nombre', '', 'ChIJ_abc')
     assert not first['ya_existia'] and again['ya_existia'] and again['id'] == first['id']

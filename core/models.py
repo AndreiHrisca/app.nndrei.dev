@@ -80,7 +80,12 @@ class Business(PublicIdModel):
     phone = models.CharField('Teléfono', max_length=50, blank=True)
     email = models.EmailField(blank=True)
     contact = models.CharField('Persona de contacto', max_length=150, blank=True)
-    zone = models.CharField('Zona', max_length=150, blank=True)
+    # The fixed zone used before cities and neighbourhoods; kept for traceability, never filtered on.
+    legacy_zone = models.CharField('Zona antigua', max_length=150, blank=True)
+    city = models.ForeignKey('City', verbose_name='Ciudad', null=True, blank=True, on_delete=models.PROTECT, related_name='businesses')
+    neighbourhood = models.ForeignKey('Neighbourhood', verbose_name='Barrio', null=True, blank=True, on_delete=models.SET_NULL, related_name='businesses')
+    # When the address was last turned into coordinates (once; see core/geo.py).
+    geocoded_at = models.DateTimeField(null=True, blank=True)
     google_place_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     current_website = models.URLField('Web actual', blank=True)
     stage = models.CharField('Fase', max_length=30, choices=STAGES, default='found')
@@ -117,6 +122,11 @@ class Business(PublicIdModel):
 
     def get_absolute_url(self):
         return reverse('business_detail', args=[self.public_id])
+
+    @property
+    def area_label(self):
+        """'Sol, Madrid', 'Salamanca' or ''. Lists select_related city and neighbourhood."""
+        return ', '.join(x for x in [self.neighbourhood.name if self.neighbourhood_id else '', self.city.name if self.city_id else ''] if x)
 
 class ClientMembership(models.Model):
     objects = AdminRecordQuerySet.as_manager()
@@ -376,12 +386,94 @@ class AdminQuerySet(models.QuerySet):
     def visible_to(self,user):
         return self.all() if user.is_authenticated and user.role=='admin' else self.none()
 
-class SearchZone(models.Model):
+# --- Geography: municipalities (INE), neighbourhoods and the areas we search ------
+
+class City(models.Model):
+    """A Spanish municipality from the INE register. Location and outline come from
+    OpenStreetMap the first time the city is used, and are kept (core/geo_sources.py)."""
+    ine_code = models.CharField('Código INE', max_length=5, unique=True)
+    name = models.CharField('Nombre', max_length=150)
+    search_name = models.CharField(max_length=150, db_index=True)
+    province = models.CharField('Provincia', max_length=60)
+    community = models.CharField('Comunidad', max_length=60)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    bbox = models.JSONField(null=True, blank=True, help_text='[sur, oeste, norte, este]')
+    geometry = models.JSONField(null=True, blank=True, help_text='GeoJSON (Polygon o MultiPolygon), lon/lat.')
+    osm_relation = models.BigIntegerField(null=True, blank=True)
+    geocoded_at = models.DateTimeField(null=True, blank=True)
+    neighbourhoods_fetched_at = models.DateTimeField(null=True, blank=True)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Ciudad'
+        verbose_name_plural = 'Ciudades'
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.province})'
+
+
+class Neighbourhood(models.Model):
+    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='neighbourhoods')
+    name = models.CharField('Nombre', max_length=150)
+    search_name = models.CharField(max_length=150, db_index=True)
+    district = models.CharField('Distrito', max_length=150, blank=True)
+    source = models.CharField(max_length=10, choices=[('madrid', 'Ayuntamiento de Madrid'), ('osm', 'OpenStreetMap')])
+    external_id = models.CharField(max_length=60)
+    bbox = models.JSONField(help_text='[sur, oeste, norte, este]')
+    geometry = models.JSONField(null=True, blank=True)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Barrio'
+        ordering = ['name']
+        constraints = [models.UniqueConstraint(fields=['city', 'source', 'external_id'], name='unique_neighbourhood')]
+
+    def __str__(self):
+        return self.name
+
+
+class SearchArea(models.Model):
+    """A city, or one of its neighbourhoods, searched in Google. Active ones are what
+    "Actualizar" goes through; inactive ones keep their businesses but are not refreshed."""
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name='search_areas')
+    neighbourhood = models.ForeignKey(Neighbourhood, null=True, blank=True, on_delete=models.CASCADE, related_name='search_areas')
+    active = models.BooleanField('Activa', default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Zona de búsqueda'
+        verbose_name_plural = 'Zonas de búsqueda'
+        constraints = [
+            models.UniqueConstraint(fields=['city', 'neighbourhood'], name='unique_search_area'),
+            models.UniqueConstraint(fields=['city'], condition=models.Q(neighbourhood__isnull=True), name='unique_whole_city_area'),
+        ]
+
+    def __str__(self):
+        return f'{self.neighbourhood.name}, {self.city.name}' if self.neighbourhood_id else f'{self.city.name} (toda la ciudad)'
+
+
+class ExternalCall(models.Model):
+    """Last call to a rate-limited service (Nominatim, Overpass), shared by every process."""
+    service = models.CharField(max_length=30, primary_key=True)
+    last_at = models.DateTimeField()
+
+
+class LegacySearchZone(models.Model):
+    """The fixed zones (a point and a radius) used before cities and neighbourhoods.
+
+    Kept for traceability. `setup_geography` turns each active one into an active
+    search area for the official neighbourhood that contains its centre.
+    """
     name = models.CharField('Nombre',max_length=150,unique=True)
     latitude = models.FloatField('Latitud',null=True,blank=True)
     longitude = models.FloatField('Longitud',null=True,blank=True)
-    radius = models.PositiveIntegerField('Radio (m)',default=1000)
     active = models.BooleanField('Activa',default=True)
+    resolved_area = models.ForeignKey('SearchArea',null=True,blank=True,on_delete=models.SET_NULL)
     objects = AdminQuerySet.as_manager()
     def __str__(self): return self.name
 
@@ -408,31 +500,38 @@ class PlaceSnapshot(PublicIdModel):
     maps_url = models.URLField(blank=True,max_length=1000)
     business_status = models.CharField(max_length=40,default='OPERATIONAL')
     fetched_at = models.DateTimeField(default=timezone.now)
-    zone = models.ForeignKey(SearchZone,on_delete=models.PROTECT)
     category = models.ForeignKey(SearchCategory,on_delete=models.PROTECT)
     opportunity_score = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(max_length=20,choices=[('new','Nuevo'),('pipeline',labels.OPPORTUNITY_IN_PIPELINE),('discarded','Descartado')],default='new')
     notes = models.TextField(blank=True)
     business = models.ForeignKey(Business,null=True,blank=True,on_delete=models.PROTECT)
-    distance_m = models.PositiveIntegerField(default=0)
+    city = models.ForeignKey(City,null=True,blank=True,on_delete=models.PROTECT)
+    neighbourhood = models.ForeignKey(Neighbourhood,null=True,blank=True,on_delete=models.SET_NULL)
     latitude = models.FloatField(null=True,blank=True)
     longitude = models.FloatField(null=True,blank=True)
     opening_hours = models.JSONField(null=True,blank=True)
     price_level = models.CharField(max_length=40,blank=True)
     objects = AdminQuerySet.as_manager()
 
+    @property
+    def area_label(self):
+        return ', '.join(x for x in [self.neighbourhood.name if self.neighbourhood_id else '', self.city.name if self.city_id else ''] if x)
+
 class SearchSlice(models.Model):
-    """When a zone × category pair was last asked to Google.
+    """When an area × category pair was last asked to Google.
 
     "Actualizar" skips pairs fetched in the last PLACES_REFRESH_MIN_DAYS, so
     pressing it twice does not spend the monthly quota twice.
     """
-    zone = models.ForeignKey(SearchZone,on_delete=models.CASCADE)
+    area = models.ForeignKey(SearchArea,on_delete=models.CASCADE)
     category = models.ForeignKey(SearchCategory,on_delete=models.CASCADE)
-    fetched_at = models.DateTimeField()
+    # Set when every cell has been searched. A search cut short by the budget leaves it
+    # empty and remembers the next cell, so the following run carries on from there.
+    fetched_at = models.DateTimeField(null=True,blank=True)
+    next_cell = models.PositiveIntegerField(default=0)
     objects = AdminQuerySet.as_manager()
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['zone','category'],name='unique_search_slice')]
+        constraints = [models.UniqueConstraint(fields=['area','category'],name='unique_search_area_slice')]
 
 class PlacesUsage(models.Model):
     month = models.DateField(unique=True)

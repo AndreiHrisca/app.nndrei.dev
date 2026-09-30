@@ -66,10 +66,10 @@ def test_seed_idempotent(monkeypatch):
     assert ClientCharge.objects.get(kind='domain').amount is None
 
 def test_daily_purges_provider_cache_but_preserves_workflow():
-    from core.models import SearchZone,SearchCategory,PlaceSnapshot
+    from core.models import SearchCategory,PlaceSnapshot
     from core.tasks import daily_maintenance
-    z=SearchZone.objects.create(name='Zone'); c=SearchCategory.objects.create(name='Category')
-    p=PlaceSnapshot.objects.create(place_id='keep-id',name='Cached',phone='123',zone=z,category=c,status='discarded',notes='Keep own notes',fetched_at=timezone.now()-timedelta(days=31))
+    c=SearchCategory.objects.create(name='Category')
+    p=PlaceSnapshot.objects.create(place_id='keep-id',name='Cached',phone='123',category=c,status='discarded',notes='Keep own notes',fetched_at=timezone.now()-timedelta(days=31))
     daily_maintenance(); p.refresh_from_db()
     assert p.name=='' and p.phone=='' and p.place_id=='keep-id'
     assert p.status=='discarded' and p.notes=='Keep own notes'

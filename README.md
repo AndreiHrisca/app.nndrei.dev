@@ -10,7 +10,8 @@ Django 5.2, Python 3.12, PostgreSQL 16, HTMX y CSS propio. Interfaz en español 
 4. `docker compose run --rm web python manage.py migrate`
 5. `docker compose run --rm web python manage.py seed_demo`
 6. `docker compose run --rm web python manage.py setup_schedules`
-7. `docker compose up -d web worker`
+7. `docker compose run --rm web python manage.py setup_geography` (municipios del INE, barrios de Madrid y ciudad/barrio de cada negocio; se puede repetir)
+8. `docker compose up -d web worker mcp`
 
 Conecta tu proxy al servicio `web:8000` dentro de la red de Compose. No hay puertos públicos en el Compose principal. Para probar en localhost: `docker compose -f compose.yaml -f compose.local.yaml up -d`. Abre http://localhost:8000. El primer acceso de un administrador exige escanear el QR TOTP; la política por rol se cambia en `/admin/` (Políticas de verificación en dos pasos). Los clientes pueden entrar con un enlace al email, que envía el `worker`.
 

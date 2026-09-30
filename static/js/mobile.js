@@ -156,3 +156,40 @@ document.addEventListener('click', event => {
     row.classList.toggle('is-closed', closed);
   }
 });
+
+// "Buscar clientes": city autocomplete (8,000+ municipalities) and its neighbourhoods.
+(() => {
+  const loadBarrios = (picker, cityId) => {
+    const slot = picker.nextElementSibling;
+    if (!slot?.matches('[data-barrio-slot]')) return;
+    const prefix = slot.dataset.prefix || '';
+    if (!cityId) {
+      slot.innerHTML = `<label for="${prefix}barrio">Barrio</label><select id="${prefix}barrio" name="barrio" disabled><option value="">Elige primero una ciudad</option></select>`;
+      return;
+    }
+    slot.innerHTML = '<label>Barrio</label><select disabled><option>Cargando barrios…</option></select>';
+    htmx.ajax('GET', `/buscar/barrios/?city=${encodeURIComponent(cityId)}&prefix=${encodeURIComponent(prefix)}`, {target: slot, swap: 'innerHTML'});
+  };
+  document.addEventListener('click', event => {
+    const option = event.target.closest('[data-city-option]');
+    if (!option) return;
+    const picker = option.closest('[data-city-picker]');
+    picker.querySelector('[data-city-id]').value = option.dataset.cityOption;
+    const input = picker.querySelector('[data-city-input]');
+    input.value = option.dataset.cityLabel;
+    input.setAttribute('aria-expanded', 'false');
+    picker.querySelector('.city-options').innerHTML = '';
+    loadBarrios(picker, option.dataset.cityOption);
+  });
+  document.addEventListener('input', event => {
+    const input = event.target.closest('[data-city-input]');
+    if (!input) return;
+    input.setAttribute('aria-expanded', input.value.trim().length >= 2 ? 'true' : 'false');
+    if (!input.value.trim()) {
+      const picker = input.closest('[data-city-picker]');
+      picker.querySelector('[data-city-id]').value = '';
+      picker.querySelector('.city-options').innerHTML = '';
+      loadBarrios(picker, '');
+    }
+  });
+})();

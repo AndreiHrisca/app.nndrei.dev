@@ -30,7 +30,8 @@ def test_directions_fall_back_to_the_encoded_address():
     assert 'Calle+Mayor+1%2C+Madrid' in go['google']
     assert query(go['waze']) == {'q': 'Calle Mayor 1, Madrid', 'navigate': 'yes'}
     assert query(go['apple']) == {'daddr': 'Calle Mayor 1, Madrid'} and go['phone'] == ''
-    assert query(directions(Business(name='Bar Pepe', zone='Villaverde'))['apple']) == {'daddr': 'Bar Pepe Villaverde'}
+    from core.models import City
+    assert query(directions(Business(name='Bar Pepe', city=City(pk=1, name='Getafe')))['apple']) == {'daddr': 'Bar Pepe Getafe'}
 
 
 def he_ido(client, b, **extra):

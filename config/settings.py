@@ -61,6 +61,14 @@ PLACES_MONTHLY_LIMIT = env.int('PLACES_MONTHLY_LIMIT', default=800)
 PLACES_WEEKLY_REFRESH = env.bool('PLACES_WEEKLY_REFRESH', default=False)
 # "Actualizar" skips zone × category pairs fetched fewer days ago than this.
 PLACES_REFRESH_MIN_DAYS = env.int('PLACES_REFRESH_MIN_DAYS', default=7)
+# Big areas are split into cells of about this size (km) and searched cell by cell.
+PLACES_CELL_KM = env.float('PLACES_CELL_KM', default=1.5)
+# Most calls one search (one area, its categories) may spend.
+PLACES_SEARCH_BUDGET = env.int('PLACES_SEARCH_BUDGET', default=60)
+# Above this many possible calls, the search asks before starting.
+PLACES_CONFIRM_ABOVE = env.int('PLACES_CONFIRM_ABOVE', default=30)
+# OpenStreetMap asks every client to identify itself (no personal data here).
+GEO_USER_AGENT = env('GEO_USER_AGENT', default='nndrei-app/1.0 (+https://app.nndrei.dev)')
 TRUSTED_DEVICE_DAYS = env.int('TRUSTED_DEVICE_DAYS', default=30)
 PROPOSAL_LINK_MAX_AGE = env.int('PROPOSAL_LINK_MAX_AGE', default=604800)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024

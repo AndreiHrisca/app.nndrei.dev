@@ -42,7 +42,7 @@ from .models import Business, Request, Document, AccessLink, Website
 class BusinessForm(PublicIdModelForm):
     class Meta:
         model = Business
-        fields = ['name','category','address','phone','email','contact','zone','current_website','internal_notes','legal_name','tax_id','next_action','next_action_date']
+        fields = ['name','category','address','phone','email','contact','current_website','internal_notes','legal_name','tax_id','next_action','next_action_date']
         widgets = {'next_action_date':forms.DateInput(attrs={'type':'date'})}
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)

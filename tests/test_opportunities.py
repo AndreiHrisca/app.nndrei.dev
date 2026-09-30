@@ -1,16 +1,15 @@
 """Captar / Descartar in "Buscar clientes"."""
 import pytest
 from core import labels
-from core.models import ActivityEvent, Business, PlaceSnapshot, SearchCategory, SearchZone
+from core.models import ActivityEvent, Business, PlaceSnapshot, SearchCategory
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
 def opportunities(db):
-    zone = SearchZone.objects.create(name='Villaverde', latitude=40.4, longitude=-3.7)
     category = SearchCategory.objects.create(name='Bares', color='yellow')
-    return [PlaceSnapshot.objects.create(place_id=f'place-{i}', name=f'Bar {i}', zone=zone, category=category, rating=4.7, reviews=1960, photos=8, has_website=False, phone='600 123 456') for i in range(3)]
+    return [PlaceSnapshot.objects.create(place_id=f'place-{i}', name=f'Bar {i}', category=category, rating=4.7, reviews=1960, photos=8, has_website=False, phone='600 123 456') for i in range(3)]
 
 
 def counter(body, label):

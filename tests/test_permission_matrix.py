@@ -4,7 +4,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from django.utils import timezone
-from core.models import Business,Request,Document,Proposal,ProposalVersion,ProposalLine,FollowUp,SearchZone,SearchCategory,PlaceSnapshot,SearchRun,Transaction,ClientCharge,RecurringExpense,Commission
+from core.models import Business,Request,Document,Proposal,ProposalVersion,ProposalLine,FollowUp,City,SearchArea,SearchCategory,PlaceSnapshot,SearchRun,Transaction,ClientCharge,RecurringExpense,Commission
 pytestmark=pytest.mark.django_db
 ROLES=['admin','developer','accountant','client']
 ALL=set(ROLES); INTERNAL={'admin','developer','accountant'}; AD={'admin','developer'}; AC={'admin','accountant'}; ADMIN={'admin'}; CLIENT={'client'}
@@ -21,8 +21,9 @@ def route_objects(accounts,businesses):
     draft=Proposal.objects.create(business=b,number='P-2026-DRAFT')
     ProposalVersion.objects.create(proposal=draft,number=1)
     f=FollowUp.objects.create(business=b,description='Llamada',date=date.today(),owner=accounts['admin'],kind='call')
-    zone=SearchZone.objects.create(name='Zone'); category=SearchCategory.objects.create(name='Bar')
-    place=PlaceSnapshot.objects.create(place_id='place',name='Bar',zone=zone,category=category)
+    category=SearchCategory.objects.create(name='Bar')
+    place=PlaceSnapshot.objects.create(place_id='place',name='Bar',category=category)
+    area=SearchArea.objects.create(city=City.objects.get(ine_code='28079'))
     run=SearchRun.objects.create(status='done')
     tx=Transaction.objects.create(date=date.today(),concept='Expense',category='hosting',amount=-3,receipt=SimpleUploadedFile('receipt.txt',b'RECEIPT'))
     charge=ClientCharge.objects.create(business=b,concept='Cargo',kind='maintenance',amount=20)
@@ -30,7 +31,7 @@ def route_objects(accounts,businesses):
     commission=Commission.objects.create(business=b,beneficiary='Person',fixed_amount=10)
     from core.demos import save_demo
     save_demo(b,b'<!doctype html><title>Demo</title>')
-    return {'business':b.public_id,'request':req.public_id,'document':doc.public_id,'proposal':p.public_id,'draft':draft.public_id,'version':v.number,'followup':f.public_id,'place':place.public_id,'run':run.public_id,'transaction':tx.public_id,'charge':charge.public_id,'expense':expense.public_id,'commission':commission.public_id,'user':accounts['developer'].public_id}
+    return {'business':b.public_id,'request':req.public_id,'document':doc.public_id,'proposal':p.public_id,'draft':draft.public_id,'version':v.number,'followup':f.public_id,'place':place.public_id,'run':run.public_id,'transaction':tx.public_id,'charge':charge.public_id,'expense':expense.public_id,'commission':commission.public_id,'user':accounts['developer'].public_id,'area':area.pk}
 
 CASES=[
  ('manifest',[],ALL,'get'),('service_worker',[],ALL,'get'),('offline',[],ALL,'get'),
@@ -40,7 +41,7 @@ CASES=[
  ('portal_list',['=peticiones'],CLIENT,'get'),('portal_list',['=documentos'],CLIENT,'get'),('portal_charges',[],CLIENT,'get'),
  ('proposals',[],ALL,'get'),('proposal_create',[],ADMIN,'both'),('proposal_detail',['proposal'],ALL,'get'),('proposal_pdf',['proposal'],ALL,'get'),('proposal_edit',['draft'],ADMIN,'both'),
  ('proposal_action',['proposal','=accept'],{'admin','client'},'post'),('proposal_action',['proposal','=changes'],{'admin','client'},'post'),('proposal_action',['proposal','=reject'],{'admin','client'},'post'),('proposal_action',['proposal','=send'],ADMIN,'post'),('proposal_action',['proposal','=revise'],ADMIN,'post'),
- ('search',[],ADMIN,'get'),('search_refresh',[],ADMIN,'post'),('search_progress',['run'],ADMIN,'get'),('place_capture',['place'],ADMIN,'both'),('place_discard',['place'],ADMIN,'post'),('stage',['business'],ADMIN,'post'),('followup',['business'],ADMIN,'both'),('visit',['business'],ADMIN,'both'),('followup_done',['followup'],ADMIN,'post'),
+ ('search',[],ADMIN,'get'),('search_refresh',[],ADMIN,'post'),('search_progress',['run'],ADMIN,'get'),('city_options',[],ADMIN,'get'),('neighbourhood_options',[],ADMIN,'get'),('area_panel',[],ADMIN,'get'),('area_search',[],ADMIN,'post'),('area_activate',[],ADMIN,'post'),('area_toggle',['area'],ADMIN,'post'),('place_capture',['place'],ADMIN,'both'),('place_discard',['place'],ADMIN,'post'),('stage',['business'],ADMIN,'post'),('followup',['business'],ADMIN,'both'),('visit',['business'],ADMIN,'both'),('followup_done',['followup'],ADMIN,'post'),
  ('finance',[],AC,'get'),('finance_csv',[],AC,'get'),('receipt',['transaction'],AC,'get'),
  ('more',[],ALL,'get'),('business_note',['business'],AD,'post'),
  ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),

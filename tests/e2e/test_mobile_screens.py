@@ -22,7 +22,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice  # noqa: E402
 from core.models import (  # noqa: E402
     ActivityEvent, Assignment, Business, ClientCharge, ClientMembership, Commission, Document, FollowUp,
     PlaceSnapshot, PlacesUsage, Proposal, ProposalLine, ProposalVersion, RecurringExpense, Request,
-    SearchCategory, SearchZone, Study, Transaction, User, Website,
+    City, Neighbourhood, SearchArea, SearchCategory, Study, Transaction, User, Website,
 )
 
 # Playwright's sync API runs its own event loop in this thread; the ORM calls
@@ -42,7 +42,16 @@ def demo(db):
     today = timezone.localdate()
     users = {role: User.objects.create_user(f'{role}@example.com', 'Valid-test-password-829!', name=name, role=role)
              for role, name in [('admin', 'Andrei'), ('developer', 'Lucía Developer'), ('accountant', 'Marta Contable'), ('client', 'Santiago')]}
-    zones = [SearchZone.objects.create(name=n, latitude=40.35, longitude=-3.69) for n in ['Villaverde Bajo', 'Miguel Hernández', 'San Cristóbal de los Ángeles']]
+    madrid = City.objects.get_or_create(ine_code='28079', defaults={'name': 'Madrid', 'search_name': 'madrid', 'province': 'Madrid', 'community': 'Comunidad de Madrid'})[0]
+    madrid.neighbourhoods_fetched_at = timezone.now()
+    madrid.save()
+
+    def barrio(name, lat, code):
+        ring = [[-3.70, lat], [-3.68, lat], [-3.68, lat + 0.01], [-3.70, lat + 0.01], [-3.70, lat]]
+        return Neighbourhood.objects.create(city=madrid, name=name, search_name=name.lower(), district='Villaverde', source='madrid', external_id=code,
+                                            bbox=[lat, -3.70, lat + 0.01, -3.68], geometry={'type': 'Polygon', 'coordinates': [ring]}, latitude=lat + 0.005, longitude=-3.69)
+    zones = [barrio('Los Ángeles', 40.35, '176'), barrio('San Cristóbal', 40.34, '172'), barrio('Butarque', 40.33, '173')]
+    SearchArea.objects.create(city=madrid, neighbourhood=zones[1], active=True)
     cats = {n: SearchCategory.objects.create(name=n, color=c) for n, c in [
         ('Bares', 'yellow'), ('Peluquerías', 'pink'), ('Talleres', 'blue'), ('Clínicas dentales', 'green'), ('Cafeterías', 'purple'), ('Gimnasios', 'teal')]}
     rows = [
@@ -60,7 +69,7 @@ def demo(db):
     bs = []
     for i, (name, cat, stage, phone, address) in enumerate(rows):
         b = Business.objects.create(name=name, category=cats[cat], stage=stage, phone=phone, address=address,
-                                    zone=zones[i % 3].name, contact='Santiago' if i == 0 else '', email='hola@example.com' if i < 3 else '',
+                                    city=madrid, neighbourhood=zones[i % 3], contact='Santiago' if i == 0 else '', email='hola@example.com' if i < 3 else '',
                                     next_action='Llamar para concretar visita' if i % 3 == 1 else '',
                                     next_action_date=today + timedelta(days=i) if i % 2 else None,
                                     stage_changed_at=timezone.now() - timedelta(days=i))
@@ -89,8 +98,8 @@ def demo(db):
         status = 'pipeline' if i in (2, 5) else 'discarded' if i in (7, 11) else 'new'
         PlaceSnapshot.objects.create(
             place_id=f'place-{i}', name=['Bar Casa Paco', 'Peluquería Marisol de Villaverde Alto', 'Taller El Pistón', 'Cafetería Nuevo Estilo'][i % 4] + (f' {i}' if i > 3 else ''),
-            zone=zones[i % 3], category=list(cats.values())[i % 6], rating=3.8 + (i % 10) / 10, reviews=40 + i * 37, photos=i % 9, has_website=i % 3 == 0,
-            website_url='https://example.com' if i % 3 == 0 else '', opportunity_score=100 - i * 3, status=status, business=bs[i % 3] if status == 'pipeline' else None, distance_m=300 + i * 50)
+            city=madrid, neighbourhood=zones[i % 3], category=list(cats.values())[i % 6], rating=3.8 + (i % 10) / 10, reviews=40 + i * 37, photos=i % 9, has_website=i % 3 == 0,
+            website_url='https://example.com' if i % 3 == 0 else '', opportunity_score=100 - i * 3, status=status, business=bs[i % 3] if status == 'pipeline' else None)
     PlacesUsage.objects.create(month=today.replace(day=1), requests=51)
     for months_back, amount in [(0, 500), (1, 1200), (2, 0), (3, 430), (5, 250)]:
         day = (today.replace(day=1) - timedelta(days=28 * months_back)).replace(day=5)
@@ -203,9 +212,9 @@ def test_desktop_screens(browser, client, live_server, demo):
 
 def test_phone_interactions(browser, client, live_server, demo):
     """The HTMX flows behind the phone controls, driven like a thumb would."""
-    zone, category = SearchZone.objects.first(), SearchCategory.objects.first()
+    madrid, category = City.objects.get_or_create(ine_code='28079', defaults={'name': 'Madrid', 'search_name': 'madrid', 'province': 'Madrid', 'community': 'Comunidad de Madrid'})[0], SearchCategory.objects.first()
     for i in range(40):  # Enough rows for a second page of opportunities.
-        PlaceSnapshot.objects.create(place_id=f'extra-{i}', name=f'Negocio extra {i}', zone=zone, category=category, opportunity_score=5, reviews=10)
+        PlaceSnapshot.objects.create(place_id=f'extra-{i}', name=f'Negocio extra {i}', city=madrid, category=category, opportunity_score=5, reviews=10)
     context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
     cards = '.mob-only .list-card'
 
@@ -362,4 +371,25 @@ def test_estimation_card(browser, client, live_server, demo):
     page.wait_for_selector('#estimation-card .est-mid')
     card.locator('.est-how summary').click()
     page.locator('#estimation-card').screenshot(path=str(OUT / '393-admin-estimacion.png'))
+    context.close()
+
+
+def test_city_and_neighbourhood_filter(browser, client, live_server, demo):
+    """Buscar clientes on a phone: type a city, pick it, pick a neighbourhood, see its area panel."""
+    City.objects.create(ine_code='28092', name='Móstoles', search_name='mostoles', province='Madrid', community='Comunidad de Madrid')
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + '/buscar/')
+    page.locator('[data-sheet-open="m-search-sheet"]').click()
+    sheet = page.locator('#m-search-sheet')
+    sheet.locator('[data-city-input]').fill('madr')
+    sheet.locator('[data-city-option]', has_text='Madrid').first.click()
+    page.wait_for_selector('#m-barrio option:has-text("San Cristóbal")', state='attached')
+    assert sheet.locator('#m-barrio option').first.inner_text() == 'Toda la ciudad'
+    sheet.locator('#m-barrio').select_option(label='San Cristóbal (Villaverde)')
+    assert overflow(page)['scroll'] <= PHONE['width']
+    sheet.screenshot(path=str(OUT / '393-admin-buscar-filtros.png'))
+    sheet.get_by_role('button', name='Aplicar').click()
+    page.wait_for_selector('#area-panel .chip')
+    assert 'Zona activa' in page.locator('#area-panel').inner_text()
+    page.screenshot(path=str(OUT / '393-admin-buscar-zona.png'), full_page=True)
     context.close()

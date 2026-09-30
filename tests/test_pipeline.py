@@ -1,6 +1,6 @@
 import pytest
 from django.core.exceptions import ValidationError
-from core.models import SearchZone,SearchCategory,PlaceSnapshot,PlacesUsage,StageChange
+from core.models import SearchCategory,PlaceSnapshot,PlacesUsage,StageChange
 from core.services import transition_business
 from core.places import opportunity_score,store_place,reserve_call,search_body
 pytestmark=pytest.mark.django_db
@@ -17,17 +17,18 @@ def test_transitions(accounts,businesses):
     transition_business(accounts['admin'],b.public_id,'discarded','Cerrado')
     assert StageChange.objects.count()==2
 
-def test_dedup_and_circle(settings):
-    z=SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
+def test_dedup_and_outline(settings,area):
     c=SearchCategory.objects.create(name='Bares')
+    shape,barrios=(area.neighbourhood.geometry,area.neighbourhood.bbox),[area.neighbourhood]
     p={'id':'place','displayName':{'text':'Bar'},'location':{'latitude':40.4,'longitude':-3.7},'businessStatus':'OPERATIONAL'}
-    store_place(p,z,c)
+    store_place(p,area,c,shape,barrios)
     item=PlaceSnapshot.objects.get(); item.status='discarded'; item.notes='Keep'; item.save()
-    p['displayName']['text']='Nuevo nombre'; store_place(p,z,c)
+    assert item.city==area.city and item.neighbourhood==area.neighbourhood
+    p['displayName']['text']='Nuevo nombre'; store_place(p,area,c,shape,barrios)
     item.refresh_from_db(); assert item.status=='discarded' and item.notes=='Keep' and item.name=='Nuevo nombre'
-    p['id']='far'; p['location']['latitude']=41; store_place(p,z,c)
+    p['id']='far'; p['location']['latitude']=41; store_place(p,area,c,shape,barrios)
     assert PlaceSnapshot.objects.count()==1
-    assert 'rectangle' in search_body(z,c)['locationRestriction']
+    assert 'rectangle' in search_body([40.39,-3.71,40.41,-3.69],c)['locationRestriction']
     settings.PLACES_MONTHLY_LIMIT=1
     assert reserve_call() and not reserve_call()
 
@@ -40,12 +41,11 @@ def test_pipeline_permissions(sign_in,businesses,role):
     if role!='admin':
         assert client.post('/buscar/actualizar/',HTTP_HX_REQUEST='true').status_code==404
 
-def test_refresh_pagination_and_field_mask(settings):
+def test_refresh_pagination_and_field_mask(settings,area):
     from unittest.mock import patch,Mock
     from core.places import refresh_places,FIELD_MASK
     from core.models import SearchRun
     settings.GOOGLE_PLACES_API_KEY='test-key'
-    SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
     SearchCategory.objects.create(name='Bares',included_type='bar')
     responses=[]
     for i in range(3):
@@ -60,11 +60,10 @@ def test_refresh_pagination_and_field_mask(settings):
     assert post.call_args.kwargs['json']['pageToken']=='page-2'
     assert PlacesUsage.objects.get().requests==3
 
-def test_closed_place_is_not_kept_operational():
-    z=SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
+def test_closed_place_is_not_kept_operational(area):
     c=SearchCategory.objects.create(name='Bar')
-    PlaceSnapshot.objects.create(place_id='closed',name='Bar',zone=z,category=c,status='discarded')
-    store_place({'id':'closed','businessStatus':'CLOSED_PERMANENTLY'},z,c)
+    PlaceSnapshot.objects.create(place_id='closed',name='Bar',category=c,status='discarded')
+    store_place({'id':'closed','businessStatus':'CLOSED_PERMANENTLY'},area,c,(area.neighbourhood.geometry,area.neighbourhood.bbox),[])
     item=PlaceSnapshot.objects.get()
     assert item.business_status=='CLOSED_PERMANENTLY' and item.status=='discarded'
 

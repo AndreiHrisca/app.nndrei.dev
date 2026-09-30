@@ -115,17 +115,26 @@ def move_to_demo_ready(business, user):
 def summary(business):
     return {'id': str(business.public_id), 'nombre': business.name, 'fase': business.get_stage_display(),
             'sector': business.category.name if business.category else '', 'direccion': business.address,
-            'zona': business.zone, 'telefono': business.phone}
+            'ciudad': business.city.name if business.city_id else '', 'provincia': business.city.province if business.city_id else '',
+            'barrio': business.neighbourhood.name if business.neighbourhood_id else '', 'telefono': business.phone}
 
 
 # --- Reading ----------------------------------------------------------------------
 
-def buscar_clientes(user, texto=None, estado=None):
+def buscar_clientes(user, texto=None, estado=None, ciudad=None, barrio=None):
     require_admin(user)
-    items = visible_queryset(Business, user).select_related('category')
+    from .geo import normalize
+    items = visible_queryset(Business, user).select_related('category', 'city', 'neighbourhood')
     query = text(texto, 'texto', 200)
     if query:
-        items = items.filter(Q(name__icontains=query) | Q(address__icontains=query) | Q(zone__icontains=query))
+        # The old fixed zones ("Villaverde Bajo"…) still find their businesses.
+        items = items.filter(Q(name__icontains=query) | Q(address__icontains=query) | Q(legacy_zone__icontains=query))
+    city_name = normalize(text(ciudad, 'ciudad', 150))
+    if city_name:
+        items = items.filter(city__search_name__contains=city_name)
+    barrio_name = normalize(text(barrio, 'barrio', 150))
+    if barrio_name:
+        items = items.filter(neighbourhood__search_name__contains=barrio_name)
     key = stage_key(estado)
     items = items.filter(stage=key) if key else items.exclude(stage='discarded')
     items = list(items.order_by('name')[:SEARCH_LIMIT + 1])
@@ -198,8 +207,11 @@ def crear_cliente(user, nombre, direccion, place_id=None):
         from .places import apply_snapshot
         b.category = snapshot.category
         b.phone = b.phone or snapshot.phone
-        apply_snapshot(b, snapshot)
+        apply_snapshot(b, snapshot)  # Coordinates, city and neighbourhood from the search result.
     b.save()
+    # City and neighbourhood from the coordinates, or from the address (one OpenStreetMap lookup).
+    from .geo_sources import place_business
+    place_business(b)
     if snapshot is not None and snapshot.status == 'new':
         snapshot.business, snapshot.status = b, 'pipeline'
         snapshot.save(update_fields=['business', 'status'])

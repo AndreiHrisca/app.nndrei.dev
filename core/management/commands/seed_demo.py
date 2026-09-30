@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.management.base import BaseCommand,CommandError
 from django.db import transaction
-from core.models import User,Business,Website,Proposal,ProposalVersion,ProposalLine,ProposalSequence,ClientCharge,Request,SearchZone,SearchCategory
+from core.models import User,Business,Website,Proposal,ProposalVersion,ProposalLine,ProposalSequence,ClientCharge,Request,SearchCategory
 
 class Command(BaseCommand):
     help='Seed confirmed business data without inventing dates or unknown amounts.'
@@ -20,8 +20,6 @@ class Command(BaseCommand):
             admin=User.objects.create_superuser(email,password,name='Andrei')
         elif admin.role!='admin':
             raise CommandError('El email configurado ya pertenece a una cuenta que no es admin.')
-        for zone in ['Villaverde Bajo','Miguel Hernández']:
-            SearchZone.objects.get_or_create(name=zone)
         categories=[('Bares','bar'),('Cafeterías','cafe'),('Barberías','barber_shop'),('Peluquerías','hair_salon'),('Dentistas','dentist'),('Clínicas','medical_clinic'),('Veterinarios','veterinary_care'),('Gimnasios','gym'),('Hoteles','hotel'),('Talleres','car_repair'),('Comercios','store')]
         colors=['yellow','pink','green','blue','purple','teal']
         for i,(name,kind) in enumerate(categories):

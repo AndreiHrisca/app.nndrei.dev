@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 from django.utils import timezone
 from core.hours import MADRID, format_distance, hours_status, period, week_summary
-from core.models import ActivityEvent, Business, PlaceSnapshot, PlacesUsage, SearchCategory, SearchSlice, SearchZone
+from core.models import ActivityEvent, Business, PlaceSnapshot, PlacesUsage, SearchCategory, SearchSlice
 
 # Google's day numbers: 0 = Sunday … 6 = Saturday.
 SUN, MON, TUE, WED, THU, FRI, SAT = range(7)
@@ -179,8 +179,8 @@ GOOGLE_PLACE = {'id': 'g-1', 'displayName': {'text': 'Bar Uno'}, 'businessStatus
 
 
 @pytest.fixture
-def zone_category(db):
-    return SearchZone.objects.create(name='Centro', latitude=40.4, longitude=-3.7, radius=2000), SearchCategory.objects.create(name='Bares')
+def zone_category(area):
+    return area, SearchCategory.objects.create(name='Bares')
 
 
 def fake_search(places):
@@ -225,7 +225,7 @@ def test_second_refresh_spends_nothing(settings, zone_category):
 def test_search_page_says_what_refresh_costs(sign_in, zone_category):
     body = sign_in('admin').get('/buscar/').content.decode()
     assert 'Se consultarán 1 combinaciones' in body
-    SearchSlice.objects.create(zone=zone_category[0], category=zone_category[1], fetched_at=timezone.now())
+    SearchSlice.objects.create(area=zone_category[0], category=zone_category[1], fetched_at=timezone.now())
     body = sign_in('admin').get('/buscar/').content.decode()
     assert 'No se gastará ninguna llamada' in body
 
@@ -233,10 +233,11 @@ def test_search_page_says_what_refresh_costs(sign_in, zone_category):
 @pytest.mark.django_db
 def test_capture_carries_hours_and_location(sign_in, zone_category):
     zone, category = zone_category
-    snapshot = PlaceSnapshot.objects.create(place_id='g-9', name='Bar Nueve', zone=zone, category=category, latitude=40.41, longitude=-3.71, opening_hours=WEEKDAYS, price_level='PRICE_LEVEL_INEXPENSIVE')
+    snapshot = PlaceSnapshot.objects.create(place_id='g-9', name='Bar Nueve', city=zone.city, neighbourhood=zone.neighbourhood, category=category, latitude=40.41, longitude=-3.71, opening_hours=WEEKDAYS, price_level='PRICE_LEVEL_INEXPENSIVE')
     sign_in('admin').post(f'/buscar/{snapshot.public_id}/captar/', HTTP_HX_REQUEST='true')
     b = Business.objects.get(google_place_id='g-9')
     assert b.opening_hours == WEEKDAYS and b.hours_source == 'google' and b.latitude == 40.41 and b.google_price_level == 'PRICE_LEVEL_INEXPENSIVE'
+    assert b.city == zone.city and b.neighbourhood == zone.neighbourhood
 
 
 @pytest.mark.django_db
