@@ -121,3 +121,26 @@ urlpatterns += [
     path('demos/<slug:slug>/', views.demo_by_slug, name='demo_slug'),
     path('demos/<slug:slug>', views.demo_by_slug),
 ]
+# Card codes: nndrei.dev/qr sends the code typed by the visitor here.
+urlpatterns += [
+    path('c/<str:code>', views.redeem_code, name='redeem_code'),
+    path('c/<str:code>/', views.redeem_code),
+    path('clientes/<uuid:public_id>/demo/codigo/', views.demo_code_regenerate, name='demo_code_regenerate'),
+    path('codigos/', views.code_attempts, name='code_attempts'),
+    path('robots.txt', views.robots_txt, name='robots_txt'),
+]
+
+# Consultas from nndrei.dev/hablamos (admin only; synced by the inbox-sync service).
+from core import inquiry_views
+urlpatterns += [
+    path('consultas/', inquiry_views.inquiries, name='inquiries'),
+    path('consultas/<uuid:public_id>/', inquiry_views.inquiry_detail, name='inquiry_detail'),
+    path('consultas/<uuid:public_id>/estado/', inquiry_views.inquiry_status, name='inquiry_status'),
+    path('consultas/<uuid:public_id>/notas/', inquiry_views.inquiry_notes, name='inquiry_notes'),
+    path('consultas/<uuid:public_id>/responder/<str:channel>/', inquiry_views.inquiry_reply, name='inquiry_reply'),
+    path('consultas/<uuid:public_id>/convertir/', inquiry_views.inquiry_convert, name='inquiry_convert'),
+    path('consultas/<uuid:public_id>/eliminar/', inquiry_views.inquiry_delete, name='inquiry_delete'),
+]
+
+from core.map_views import pipeline_map_data
+urlpatterns += [path('seguimiento/mapa/datos/', pipeline_map_data, name='pipeline_map_data')]

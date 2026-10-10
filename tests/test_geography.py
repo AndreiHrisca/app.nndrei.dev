@@ -371,8 +371,14 @@ def test_mcp_search_by_city_and_neighbourhood_without_accents(accounts, area):
 
 def test_mcp_create_places_the_business_from_its_address(accounts, area, monkeypatch):
     monkeypatch.setattr(geo_sources, 'nominatim', lambda **params: [{'lat': '40.40', 'lon': '-3.70', 'address': {'city': 'Madrid', 'state': 'Comunidad de Madrid'}}])
+    queued = []
+    monkeypatch.setattr(geo_sources, 'queue_placing', lambda business: queued.append(business.pk))
     created = tools.crear_cliente(accounts['admin'], 'Bar Nuevo', 'Calle Falsa 1, Madrid')
-    assert created['ciudad'] == 'Madrid' and created['barrio'] == 'Barrio de Prueba'
+    assert queued and created['latitud'] is None
+    geo_sources.place_business_by_pk(queued[0])
+    placed = tools.get_cliente(accounts['admin'], created['id'])
+    assert placed['ciudad'] == 'Madrid' and placed['barrio'] == 'Barrio de Prueba'
+    assert placed['latitud'] == 40.4 and placed['longitud'] == -3.7
 
 
 def test_mcp_create_places_the_business_from_a_search_result(accounts, area):

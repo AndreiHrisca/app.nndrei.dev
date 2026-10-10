@@ -8,8 +8,12 @@ DEBUG = env('DEBUG')
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost'])
 CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
 SITE_URL = env('SITE_URL', default='http://localhost:8000').rstrip('/')
+# Behind Caddy, REMOTE_ADDR is the proxy. Caddy replaces X-Forwarded-For with the
+# real client address, so the card-code limit can count per visitor. Only turn
+# this on when the app port is reachable through that proxy alone.
+TRUST_X_FORWARDED_FOR = env.bool('TRUST_X_FORWARDED_FOR', default=False)
 INSTALLED_APPS = ['django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes', 'django.contrib.sessions', 'django.contrib.messages', 'django.contrib.staticfiles', 'django_otp', 'django_otp.plugins.otp_totp', 'axes', 'django_q', 'core']
-MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'django_otp.middleware.OTPMiddleware', 'core.middleware.TwoFactorMiddleware', 'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware', 'axes.middleware.AxesMiddleware']
+MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'django_otp.middleware.OTPMiddleware', 'core.middleware.TwoFactorMiddleware', 'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware', 'axes.middleware.AxesMiddleware', 'core.middleware.NoIndexMiddleware']
 ROOT_URLCONF = 'config.urls'
 TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIRS': [BASE_DIR / 'templates'], 'APP_DIRS': True, 'OPTIONS': {'context_processors': ['django.template.context_processors.request', 'django.contrib.auth.context_processors.auth', 'django.contrib.messages.context_processors.messages']}}]
 WSGI_APPLICATION = 'config.wsgi.application'
@@ -70,6 +74,12 @@ PLACES_CONFIRM_ABOVE = env.int('PLACES_CONFIRM_ABOVE', default=30)
 # OpenStreetMap asks every client to identify itself (no personal data here).
 GEO_USER_AGENT = env('GEO_USER_AGENT', default='nndrei-app/1.0 (+https://app.nndrei.dev)')
 TRUSTED_DEVICE_DAYS = env.int('TRUSTED_DEVICE_DAYS', default=30)
+# Consultas from nndrei.dev: portfolio-api's SQLite mailbox, mounted by the inbox-sync service.
+PORTFOLIO_INBOX = env('PORTFOLIO_INBOX', default='/portfolio/portfolio.sqlite3')
+INQUIRY_SYNC_INTERVAL = env.int('INQUIRY_SYNC_INTERVAL', default=30)
+# Both empty: no Telegram notice, everything else works the same.
+TELEGRAM_BOT_TOKEN = env('TELEGRAM_BOT_TOKEN', default='')
+TELEGRAM_CHAT_ID = env('TELEGRAM_CHAT_ID', default='')
 PROPOSAL_LINK_MAX_AGE = env.int('PROPOSAL_LINK_MAX_AGE', default=604800)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 

@@ -1,0 +1,13 @@
+<div class="visit-map" data-map-url="{% url 'pipeline_map_data' %}?fase={{ stage_filter }}">
+  <div class="map-toolbar"><button type="button" class="secondary" data-locate>◎ Mi ubicación</button><span class="muted" data-map-message role="status">Cargando negocios…</span></div>
+  <details class="map-missing" hidden><summary></summary><ul></ul></details>
+  <div class="map-layout">
+    <div class="map-canvas" aria-label="Mapa de clientes en curso"></div>
+    <section class="zone-panel" aria-label="Negocios por barrio">
+      <button type="button" class="zone-handle secondary" aria-expanded="false">Negocios por barrio <span>⌃</span></button>
+      <div class="zone-scroll"><div class="zone-intro"><h3>Organiza tus visitas</h3><p class="muted">Marca los negocios que quieras visitar a pie.</p></div><div data-zones></div></div>
+      <div class="route-controls"><button type="button" data-route disabled>Ruta con estos <span data-selected-count></span></button><p data-route-message role="status"></p><div data-route-links></div></div>
+    </section>
+  </div>
+  <div class="map-legend" aria-label="Fases de los negocios"></div>
+</div>

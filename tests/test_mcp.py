@@ -6,6 +6,7 @@ import secrets
 from urllib.parse import parse_qs, urlparse
 import pytest
 from core import mcp_tools as tools
+from core.demos import with_noindex
 from core.mcp_tools import ToolError
 from core.models import ActivityEvent, Business, DemoVersion, Estimation, McpToken, PlaceSnapshot, SearchCategory, Study
 
@@ -120,7 +121,7 @@ def test_demo_upload_is_versioned_and_public(admin, businesses, client):
     assert '/demos/mi-negocio-' in first['url']
     path = urlparse(second['url']).path
     response = client.get(path)
-    assert response.content == '<!doctype html><h1>v2</h1>'.encode() and 'sandbox' in response['Content-Security-Policy']
+    assert response.content == with_noindex('<!doctype html><h1>v2</h1>'.encode()) and 'sandbox' in response['Content-Security-Policy']
     assert DemoVersion.objects.get(business=b, number=2).filename == 'passwd.html'
     assert ActivityEvent.objects.filter(business=b, kind='mcp_demo').count() == 2
     for name, html, error in [('a.pdf', '<p>', '.html'), ('a.html', 'x' * (5 * 1024 * 1024 + 1), '5 MB'), ('a.html', '  ', 'vacía'), ('a.html', 42, 'texto')]:

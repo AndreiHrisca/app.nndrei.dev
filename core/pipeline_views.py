@@ -22,10 +22,14 @@ def pipeline(request):
     bs=Business.objects.visible_to(request.user)
     counts=dict(bs.values_list('stage').annotate(count=Count('pk')))
     # Tapping a stage tile narrows "Clientes en curso" to it; tapping it again clears it.
-    stage=request.GET.get('stage','')
+    stage=request.GET.get('fase',request.GET.get('stage',''))
     if stage not in dict(STAGES) or stage=='discarded': stage=''
     active=bs.exclude(stage='discarded')
     if stage: active=active.filter(stage=stage)
+    map_view=request.GET.get('vista')=='mapa'
+    if map_view:
+        active=list(active.only('pk'))
+        return render(request,'core/pipeline.html',{'title':labels.PIPELINE,'businesses':active,'map_view':True,'stage_filter':stage,'stage_label':dict(STAGES).get(stage,''),'stages':[{'key':key,'label':label,'count':counts.get(key,0)} for key,label in STAGES]})
     pending=FollowUp.objects.filter(done=False).select_related('owner').order_by('date','pk')
     # The latest estimate of each business, read in the same query as the list.
     latest=Estimation.objects.filter(business=OuterRef('pk')).order_by('-created_at','-pk')
@@ -347,6 +351,9 @@ def capture(request,snapshot,form=None):
         apply_snapshot(b,snapshot)
         b.save()
         snapshot.business=b; snapshot.status='pipeline'; snapshot.save()
+        if b.latitude is None or b.longitude is None:
+            from .geo_sources import queue_placing
+            queue_placing(b)
         activity(b,'created',labels.CAPTURE_ACTIVITY,request.user,client_visible=False)
     return snapshot
 

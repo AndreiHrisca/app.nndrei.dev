@@ -31,9 +31,12 @@ def route_objects(accounts,businesses):
     commission=Commission.objects.create(business=b,beneficiary='Person',fixed_amount=10)
     from core.demos import save_demo
     save_demo(b,b'<!doctype html><title>Demo</title>')
-    return {'business':b.public_id,'request':req.public_id,'document':doc.public_id,'proposal':p.public_id,'draft':draft.public_id,'version':v.number,'followup':f.public_id,'place':place.public_id,'run':run.public_id,'transaction':tx.public_id,'charge':charge.public_id,'expense':expense.public_id,'commission':commission.public_id,'user':accounts['developer'].public_id,'area':area.pk}
+    from core.models import Inquiry
+    inquiry=Inquiry.objects.create(sync_key='matrix',received_at=timezone.now(),name='Ana',email='ana@example.com',phone='600000000',message='Hola')
+    return {'inquiry':inquiry.public_id,'business':b.public_id,'request':req.public_id,'document':doc.public_id,'proposal':p.public_id,'draft':draft.public_id,'version':v.number,'followup':f.public_id,'place':place.public_id,'run':run.public_id,'transaction':tx.public_id,'charge':charge.public_id,'expense':expense.public_id,'commission':commission.public_id,'user':accounts['developer'].public_id,'area':area.pk}
 
 CASES=[
+ ('pipeline_map_data',[],ADMIN,'get'),
  ('manifest',[],ALL,'get'),('service_worker',[],ALL,'get'),('offline',[],ALL,'get'),
  ('home',[],ALL,'get'),('businesses',[],INTERNAL,'get'),('portal',[],CLIENT,'get'),('users',[],ADMIN,'both'),('two_factor',[],ALL,'both'),('user_edit',['user'],ADMIN,'both'),
  ('business_create',[],ADMIN,'both'),('business_detail',['business'],INTERNAL,'get'),('business_edit',['business'],ADMIN,'both'),('portal_preview',['business'],ADMIN,'get'),
@@ -44,8 +47,9 @@ CASES=[
  ('search',[],ADMIN,'get'),('search_refresh',[],ADMIN,'post'),('search_progress',['run'],ADMIN,'get'),('city_options',[],ADMIN,'get'),('neighbourhood_options',[],ADMIN,'get'),('area_panel',[],ADMIN,'get'),('area_search',[],ADMIN,'post'),('area_activate',[],ADMIN,'post'),('area_toggle',['area'],ADMIN,'post'),('place_capture',['place'],ADMIN,'both'),('place_discard',['place'],ADMIN,'post'),('stage',['business'],ADMIN,'post'),('followup',['business'],ADMIN,'both'),('visit',['business'],ADMIN,'both'),('followup_done',['followup'],ADMIN,'post'),
  ('finance',[],AC,'get'),('finance_csv',[],AC,'get'),('receipt',['transaction'],AC,'get'),
  ('more',[],ALL,'get'),('business_note',['business'],AD,'post'),
- ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),
- ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),('security',[],ALL,'get'),('business_estimation',['business'],ADMIN,'both'),('study_validate',['business'],AD,'post'),('mcp_consent',[],ADMIN,'both'),('demo_qr',['business'],AD,'get'),('security_turn_off',[],ALL,'post'),('device_revoke_all',[],ALL,'post'),
+ ('demo_upload',['business'],ADMIN,'post'),('demo_delete',['business'],ADMIN,'post'),('demo_code_regenerate',['business'],ADMIN,'post'),('code_attempts',[],ADMIN,'get'),
+ ('business_hours',['business'],ADMIN,'both'),('business_hours_reset',['business'],ADMIN,'post'),('business_google_refresh',['business'],ADMIN,'post'),('business_reactivate',['business'],ADMIN,'post'),('security',[],ALL,'get'),('business_estimation',['business'],ADMIN,'both'),('study_validate',['business'],AD,'post'),('mcp_consent',[],ADMIN,'both'),('demo_qr',['business'],AD,'get'),
+ ('inquiries',[],ADMIN,'get'),('inquiry_detail',['inquiry'],ADMIN,'get'),('inquiry_status',['inquiry'],ADMIN,'post'),('inquiry_notes',['inquiry'],ADMIN,'post'),('inquiry_reply',['inquiry','=email'],ADMIN,'post'),('inquiry_reply',['inquiry','=whatsapp'],ADMIN,'post'),('inquiry_convert',['inquiry'],ADMIN,'post'),('inquiry_delete',['inquiry'],ADMIN,'post'),('security_turn_off',[],ALL,'post'),('device_revoke_all',[],ALL,'post'),
 ]+[('business_resource',['business','='+k],AD,'both') for k in ['document','access','website']]+[('finance_create',['='+k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]+[('finance_edit',['='+k,k],ADMIN,'both') for k in ['transaction','charge','expense','commission']]
 
 @pytest.mark.parametrize('role',ROLES)
@@ -80,7 +84,7 @@ def test_matrix_covers_every_application_route():
     from config.urls import urlpatterns
     # device_revoke is owner-only by design: covered in test_access.test_only_the_owner_can_forget_a_device.
     # mcp_disconnect is owner-only (a grant id): covered in test_mcp.
-    exempt={'mcp_disconnect','demo_slug','device_revoke','login_link','login_link_use','login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public'}
+    exempt={'mcp_disconnect','demo_slug','device_revoke','login_link','login_link_use','login','logout','password_reset','password_reset_done','password_reset_confirm','password_reset_complete','accept_invitation','public_proposal','public_proposal_pdf','demo_public','redeem_code','robots_txt'}
     tested={case[0] for case in CASES}
     names={pattern.name for pattern in urlpatterns if getattr(pattern,'name',None)}
     assert names-tested-exempt==set()

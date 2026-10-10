@@ -54,9 +54,34 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+  # Consultas from nndrei.dev: every 30 s moves portfolio-api's SQLite mailbox into
+  # PostgreSQL and empties it (core/inquiry_sync.py). Same uid as portfolio-api
+  # (10001), so the 0600 database stays unreadable to anyone else. No ports, no edge.
+  inbox-sync:
+    build: .
+    container_name: nndrei-app-inbox-sync
+    command: python manage.py sync_inquiries --loop
+    user: '10001:10001'
+    env_file: .env
+    environment:
+      PORTFOLIO_INBOX: /portfolio/portfolio.sqlite3
+    volumes:
+      - portfolio_inbox:/portfolio
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 volumes:
   postgres_data:
   private_data:
+  # Created by ~/stacks/webs/nndrei-portfolio (service portfolio-api).
+  portfolio_inbox:
+    external: true
+    name: nndrei-portfolio_portfolio-data
 
 networks:
   edge:

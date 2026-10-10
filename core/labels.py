@@ -103,3 +103,19 @@ def capture_message(name):
 
 def discard_message(name):
     return f'{DISCARD}: {name} ya no aparecerá como oportunidad nueva.'
+
+
+# --- Consultas (the nndrei.dev contact form) ------------------------------------
+
+INQUIRIES = 'Consultas'
+INQUIRY_STATUS_LABELS = {
+    'new': 'Nueva',
+    'read': 'Leída',
+    'replied': 'Respondida',
+    'converted': 'Convertida',
+    'archived': 'Archivada',
+    'spam': 'Spam',
+}
+INQUIRY_ORIGIN_LABELS = {'card': 'Tarjeta / QR', 'web': 'Web', 'campaign': 'Campaña'}
+INQUIRY_DELETE_CONFIRM = '¿Eliminar esta consulta para siempre? No se puede deshacer.'
+INQUIRY_MAIL_SUBJECT = 'Tu consulta en nndrei.dev'

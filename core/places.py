@@ -72,6 +72,7 @@ def apply_google(business,place,now=None):
     loc=place.get('location',{})
     if 'latitude' in loc and 'longitude' in loc:
         business.latitude,business.longitude=loc['latitude'],loc['longitude']
+        business.geocoded_at=now
     if 'rating' in place: business.google_rating=place['rating']
     if 'userRatingCount' in place: business.google_reviews=place['userRatingCount']
     business.google_price_level=place.get('priceLevel','')
@@ -90,6 +91,8 @@ def apply_google(business,place,now=None):
 def apply_snapshot(business,snapshot):
     """Carry what the search already fetched onto a business being captured."""
     business.latitude,business.longitude=snapshot.latitude,snapshot.longitude
+    if snapshot.latitude is not None and snapshot.longitude is not None:
+        business.geocoded_at=snapshot.fetched_at
     business.google_rating,business.google_reviews=snapshot.rating,snapshot.reviews
     business.google_price_level=snapshot.price_level
     business.google_maps_url=snapshot.maps_url

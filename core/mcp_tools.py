@@ -116,7 +116,8 @@ def summary(business):
     return {'id': str(business.public_id), 'nombre': business.name, 'fase': business.get_stage_display(),
             'sector': business.category.name if business.category else '', 'direccion': business.address,
             'ciudad': business.city.name if business.city_id else '', 'provincia': business.city.province if business.city_id else '',
-            'barrio': business.neighbourhood.name if business.neighbourhood_id else '', 'telefono': business.phone}
+            'barrio': business.neighbourhood.name if business.neighbourhood_id else '', 'telefono': business.phone,
+            'latitud': business.latitude, 'longitud': business.longitude}
 
 
 # --- Reading ----------------------------------------------------------------------
@@ -183,7 +184,7 @@ def get_cliente(user, cliente_id):
     if has_demo(b):
         from .views import demo_url
         version = latest(b)
-        data['demo'] = {'url': demo_url(b), 'version': version.number if version else 1}
+        data['demo'] = {'url': demo_url(b), 'version': version.number if version else 1, 'codigo_tarjeta': b.demo_code}
     return data
 
 
@@ -209,9 +210,10 @@ def crear_cliente(user, nombre, direccion, place_id=None):
         b.phone = b.phone or snapshot.phone
         apply_snapshot(b, snapshot)  # Coordinates, city and neighbourhood from the search result.
     b.save()
-    # City and neighbourhood from the coordinates, or from the address (one OpenStreetMap lookup).
-    from .geo_sources import place_business
-    place_business(b)
+    # Provider lookups run in the same worker as clients created through the UI.
+    if b.latitude is None or b.longitude is None:
+        from .geo_sources import queue_placing
+        queue_placing(b)
     if snapshot is not None and snapshot.status == 'new':
         snapshot.business, snapshot.status = b, 'pipeline'
         snapshot.save(update_fields=['business', 'status'])

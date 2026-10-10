@@ -336,7 +336,11 @@ def place_business_by_pk(pk):
     """Queue-friendly: runs in the worker so saving a card never waits on OpenStreetMap."""
     business = Business.objects.select_related('city').filter(pk=pk).first()
     if business is not None:
-        place_business(business)
+        from .geocoding import geocode_business
+        try:
+            geocode_business(business)
+        except GeoError:
+            pass
 
 
 def queue_placing(business):

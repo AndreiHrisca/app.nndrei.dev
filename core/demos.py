@@ -3,7 +3,8 @@
 Stored as files on the private volume (like Document), not as a database
 column: a few MB of HTML has no place on every Business query, and the private
 volume is already backed up and never served as static files. Every upload is a
-new version; the newest one is public at /demos/<slug>/.
+new version; the newest one is public at /demos/<slug>/, and at /c/<code>
+for whoever has the card (core/demo_codes.py).
 """
 import hashlib
 import re
@@ -28,6 +29,17 @@ DEMO_HEADERS = {
     # The URL is the secret: never hand it to whatever the demo loads.
     'Referrer-Policy': 'no-referrer',
 }
+
+
+NOINDEX_META = b'<meta name="robots" content="noindex, nofollow">'
+HEAD_TAG = re.compile(rb'<head\b[^>]*>', re.IGNORECASE)
+
+
+def with_noindex(content):
+    """The stored file stays as uploaded; the robots meta goes in on the way out."""
+    match = HEAD_TAG.search(content)
+    at = match.end() if match else 0
+    return content[:at] + NOINDEX_META + content[at:]
 
 
 class DemoError(ValueError):
@@ -129,6 +141,8 @@ def save_demo(business, content, filename='demo.html', user=None, source='web'):
     version = DemoVersion.objects.create(business=business, number=number, filename=filename, path=path, size=len(content),
                                          sha256=hashlib.sha256(content).hexdigest(), source=source, created_by=user)
     ensure_slug(business)
+    from .demo_codes import ensure_code
+    ensure_code(business)
     return version
 
 

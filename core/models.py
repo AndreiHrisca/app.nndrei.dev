@@ -115,6 +115,9 @@ class Business(PublicIdModel):
     # Public demo address, /demos/<slug>/: the name plus a random part, so it
     # cannot be guessed from the business name.
     demo_slug = models.SlugField(max_length=60, unique=True, null=True, blank=True)
+    # Five characters handwritten on the business card; nndrei.dev/qr sends it to
+    # /c/<code>. See core/demo_codes.py for the alphabet and the rules.
+    demo_code = models.CharField('Código de demo', max_length=5, unique=True, null=True, blank=True)
     objects = BusinessQuerySet.as_manager()
 
     def __str__(self):
@@ -807,6 +810,31 @@ class DemoVersion(BusinessOwned):
         constraints = [models.UniqueConstraint(fields=['business', 'number'], name='unique_demo_version')]
 
 
+class DemoOpen(BusinessOwned):
+    """One visit to the public demo, by card code or by its address."""
+    via = models.CharField(max_length=10, choices=[('code', 'Código'), ('direct', 'URL directa')])
+    opened_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-opened_at']
+
+
+class CodeAttempt(models.Model):
+    """Every code typed at /c/<code>, right or wrong. The address is kept only as a keyed hash."""
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    code = models.CharField(max_length=40)
+    valid = models.BooleanField(default=False)
+    rate_limited = models.BooleanField(default=False)
+    ip_hash = models.CharField(max_length=64)
+    user_agent = models.CharField(max_length=300, blank=True)
+    business = models.ForeignKey(Business, null=True, blank=True, on_delete=models.SET_NULL)
+    objects = AdminRecordQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['ip_hash', 'created_at'], name='codeattempt_ip_recent')]
+
+
 # --- MCP connector: OAuth 2.1 state (Claude.ai registers itself by DCR) ------------
 
 class McpClient(models.Model):
@@ -856,3 +884,68 @@ class McpToken(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     objects = McpTokenQuerySet.as_manager()
+
+
+# --- Consultas: the nndrei.dev/hablamos form ------------------------------------
+# portfolio-api only keeps a mailbox; core/inquiry_sync.py moves every message here
+# and empties it. From then on the app owns the data (see README, "Consultas").
+
+INQUIRY_STATUSES = [(key, labels.INQUIRY_STATUS_LABELS[key]) for key in ['new', 'read', 'replied', 'converted', 'archived', 'spam']]
+INQUIRY_RETENTION_DAYS = 180
+
+
+class Inquiry(PublicIdModel):
+    # The form's request_id, or a hash of date + email + message when it has none:
+    # what makes the sync safe to repeat.
+    sync_key = models.CharField(max_length=64, unique=True, editable=False)
+    received_at = models.DateTimeField('Recibida', db_index=True)
+    name = models.CharField('Nombre', max_length=100)
+    email = models.EmailField('Email', max_length=254)
+    phone = models.CharField('Teléfono', max_length=40, blank=True)
+    business_name = models.CharField('Negocio', max_length=160, blank=True)
+    need = models.CharField('Qué necesita', max_length=80, blank=True)
+    message = models.TextField('Mensaje')
+    budget = models.CharField('Presupuesto', max_length=100, blank=True)
+    source = models.CharField('Campaña', max_length=20, blank=True)
+    origin_page = models.CharField('Página de origen', max_length=64, blank=True)
+    status = models.CharField('Estado', max_length=12, choices=INQUIRY_STATUSES, default='new', db_index=True)
+    status_changed_at = models.DateTimeField(null=True, blank=True)
+    internal_notes = models.TextField('Notas internas', blank=True)
+    # Converted inquiries live as long as the client card does.
+    business = models.ForeignKey(Business, verbose_name='Cliente', null=True, blank=True, on_delete=models.CASCADE, related_name='inquiries')
+    created_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    notify_attempts = models.PositiveSmallIntegerField(default=0)
+    objects = AdminRecordQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-received_at', '-pk']
+
+    def __str__(self):
+        return f'{self.name} · {self.business_name}' if self.business_name else self.name
+
+    def get_absolute_url(self):
+        return reverse('inquiry_detail', args=[self.public_id])
+
+    @property
+    def origin_kind(self):
+        """'card' (card or QR), 'campaign' or 'web': the three filters of the list."""
+        if self.source == 'card' or self.origin_page == '/qr':
+            return 'card'
+        return 'web' if self.source in ('', 'direct') else 'campaign'
+
+    def get_origin_display(self):
+        return labels.INQUIRY_ORIGIN_LABELS[self.origin_kind]
+
+
+class InquiryStatusChange(models.Model):
+    """Status history of one inquiry. It goes with the inquiry when that is deleted."""
+    inquiry = models.ForeignKey(Inquiry, on_delete=models.CASCADE, related_name='changes')
+    from_status = models.CharField(max_length=12, choices=INQUIRY_STATUSES, blank=True)
+    to_status = models.CharField(max_length=12, choices=INQUIRY_STATUSES)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    note = models.CharField(max_length=200, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['occurred_at', 'pk']

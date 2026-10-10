@@ -1,5 +1,5 @@
 /* Increment on every release that changes static assets or the offline page. */
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v5';
 const CACHE_PREFIX = 'nndrei-pwa-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const OFFLINE_URL = '/offline/';

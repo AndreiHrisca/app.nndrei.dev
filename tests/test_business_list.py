@@ -65,7 +65,8 @@ def test_listing_does_not_scale_with_the_number_of_businesses(sign_in, catalogue
     for i in range(12):
         Business.objects.create(name=f'Negocio {i}', category=bares)
     client = sign_in('admin')
-    with django_assert_max_num_queries(8):
+    # 9: one is the constant count of new inquiries in the menu badge.
+    with django_assert_max_num_queries(9):
         assert client.get('/clientes/').status_code == 200
 
 

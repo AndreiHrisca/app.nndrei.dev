@@ -215,3 +215,17 @@ Resultado: **899 pruebas superadas** + 6 de navegador; `makemigrations --check` 
 **Prueba manual fuera de Madrid** (base temporal, datos reales, ninguna llamada a Google): INE cargado en 1,7 s y segunda carga sin cambios; Valladolid: contorno MultiPolygon y 39 barrios de OSM en 2,3 s, segunda apertura desde caché; toda la ciudad son 152 celdas (una categoría: tope de 60 llamadas por búsqueda, con continuación); un barrio, 1 celda (1 a 3 llamadas). Lagueruela (Teruel, municipio pequeño): contorno del municipio, 0 barrios: se busca en el municipio entero (23 celdas).
 
 Resultado: **971 pruebas superadas** + 7 de navegador (nueva: ciudad y barrio en el móvil; capturas `393-admin-buscar-filtros.png` y `393-admin-buscar-zona.png`).
+
+## 17. Códigos de tarjeta para las demos
+
+**Flujo.** En la tarjeta va escrito a mano un código de 5 caracteres. `nndrei.dev/qr` tiene un campo que solo limpia lo escrito (quita espacios, pasa a mayúsculas) y navega a `app.nndrei.dev/c/<código>`; `nndrei.dev/qr?c=XXXXX` redirige allí directamente (nginx si es alfanumérico; si no, el script de la página). La web estática no consulta nada: solo el CRM sabe qué códigos existen.
+
+**Códigos** (`core/demo_codes.py`). Alfabeto sin 0, O, 1, I ni L (31 caracteres, ~28,6 millones de combinaciones). `Business.demo_code`, único, en mayúsculas; se genera al subir la primera demo (web o MCP) y se puede regenerar desde la ficha (solo admin; el anterior deja de funcionar). La migración `0027` da código a los negocios que ya tenían demo, también a las de antes de las versiones. Se compara ignorando mayúsculas y espacios.
+
+**Canje** (`/c/<código>`). Código correcto, negocio no descartado y con demo → `DemoOpen(via='code')` y 302 a `/demos/<slug>/` (las URLs de demo no cambian). Cualquier otro caso (formato malo, inexistente, descartado, sin demo) → la misma página neutra, 404, byte a byte idéntica. Límite: 10 intentos por IP y hora, correctos o no; después, 429 con un mensaje genérico de espera. Cada intento queda en `CodeAttempt`: fecha, código normalizado, válido/no, si lo cortó el límite, HMAC-SHA256 de la IP con `SECRET_KEY` y user agent. La vista `/codigos/` (admin, enlace «Códigos» en el menú) enseña los fallidos recientes.
+
+**IP real.** Detrás de Caddy, `REMOTE_ADDR` es el proxy. Con `TRUST_X_FORWARDED_FOR=True` se usa la última entrada de `X-Forwarded-For`, que Caddy sobrescribe con la IP del cliente. Actívalo solo si el puerto de la app no es accesible más que a través de Caddy (así es en `compose.yaml`).
+
+**Aperturas.** `/demos/<slug>/` registra `DemoOpen(via='direct')` salvo que la visita venga de `/c/` (cookie de 2 minutos limitada a esa ruta), sea un HEAD o la haga alguien del equipo con sesión. Cada apertura mueve «Última actividad» en Clientes (`GREATEST` del historial y de las aperturas) y deja una línea interna en el historial, como mucho una por hora. La ficha muestra «Demo abierta N veces · última hace X» separando código y URL directa.
+
+**Descartados y buscadores.** Un negocio descartado responde 404 en `/demos/<slug>/` y en la dirección antigua, igual que una demo inexistente. Las demos llevan `X-Robots-Tag: noindex, nofollow` y un `<meta name="robots">` que se inserta al servirlas (el archivo guardado no cambia). Toda la app lleva la misma cabecera (`NoIndexMiddleware`). `robots.txt` no enumera rutas ni sitemap y deja rastrear: así un buscador que encuentre un enlace filtrado lee el noindex en vez de indexar la URL a ciegas. `/demos/` sigue en 404.

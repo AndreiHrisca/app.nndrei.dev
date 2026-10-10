@@ -2,7 +2,7 @@
 import uuid
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from core.demos import has_demo, save_demo
+from core.demos import has_demo, save_demo, with_noindex
 from core.models import ActivityEvent, Business
 
 pytestmark = pytest.mark.django_db
@@ -30,7 +30,7 @@ def test_demo_is_public_and_served_as_is(client, businesses):
     for url in (demo_url(own), demo_url(own).rstrip('/')):
         response = client.get(url)
         assert response.status_code == 200
-        assert response.content == DEMO
+        assert response.content == with_noindex(DEMO)
         assert response['Content-Type'] == 'text/html; charset=utf-8'
         assert response['Content-Security-Policy'] == 'sandbox allow-scripts allow-popups allow-forms'
         assert response['X-Robots-Tag'] == 'noindex, nofollow'
@@ -66,7 +66,7 @@ def test_slug_is_fixed_unguessable_and_versions_pile_up(sign_in, businesses):
     second = save_demo(own, b'<html>v2</html>', 'nueva.html')
     own.refresh_from_db()
     assert own.demo_slug == slug and (first.number, second.number) == (1, 2)
-    assert sign_in('admin').get(demo_url(own)).content == b'<html>v2</html>'
+    assert sign_in('admin').get(demo_url(own)).content == with_noindex(b'<html>v2</html>')
 
 
 def test_single_file_from_before_versions_becomes_version_one(businesses):
@@ -123,14 +123,14 @@ def test_admin_uploads_replaces_and_deletes(sign_in, businesses, settings):
     assert 'Aún no hay una web publicada.' in page
 
     assert upload(client, own).status_code == 302
-    assert client.get(demo_url(own)).content == DEMO
+    assert client.get(demo_url(own)).content == with_noindex(DEMO)
     page = client.get(own.get_absolute_url()).content.decode()
     assert 'Web de muestra disponible' in page and 'Copiar enlace' in page and 'Eliminar web de muestra' in page
     assert settings.SITE_URL + demo_url(own) in page and 'Descargar QR' in page
     assert 'Aún no hay una web publicada.' in page
 
     assert upload(client, own, b'<html><body>v2</body></html>').status_code == 302
-    assert client.get(demo_url(own)).content == b'<html><body>v2</body></html>'
+    assert client.get(demo_url(own)).content == with_noindex(b'<html><body>v2</body></html>')
 
     assert client.post(f'/clientes/{own.public_id}/demo/eliminar/').status_code == 302
     assert not has_demo(own)

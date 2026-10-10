@@ -97,8 +97,11 @@ def business_edit(request,public_id):
     form = BusinessForm(request.POST or None,instance=b)
     if request.method == 'POST' and form.is_valid():
         item = form.save(commit=False)
-        if 'address' in form.changed_data and item.latitude is None:
-            item.geocoded_at = None  # A new address deserves one new lookup.
+        if 'address' in form.changed_data:
+            item.latitude = item.longitude = item.geocoded_at = None
+            item.neighbourhood = None
+            # The old Google identifier and snapshot point at the previous address.
+            item.google_place_id = None
         item.save()
         if 'address' in form.changed_data or item.city_id is None:
             from .geo_sources import queue_placing
@@ -222,7 +225,8 @@ def request_plan(request,public_id):
 # --- Clientes: one worked table instead of three bare columns -----------------
 
 from django.db.models import Case, Exists, IntegerField, OuterRef, Subquery, Value, When
-from .models import PlaceSnapshot, SearchCategory, STAGES, STAGE_ORDER
+from django.db.models.functions import Greatest
+from .models import DemoOpen, PlaceSnapshot, SearchCategory, STAGES, STAGE_ORDER
 
 # Header key -> field the queryset is ordered by. Anything else is ignored, so
 # the sort parameter can never reach the ORM as a raw field name.
@@ -235,7 +239,9 @@ def business_list_context(request):
     items = (Business.objects.visible_to(request.user)
              .select_related('category', 'city', 'neighbourhood')
              .annotate(
-                 last_activity=Subquery(ActivityEvent.objects.filter(business=OuterRef('pk')).order_by('-occurred_at', '-pk').values('occurred_at')[:1]),
+                 # GREATEST skips NULLs: whichever happened last, a history line or a demo open.
+                 last_activity=Greatest(Subquery(ActivityEvent.objects.filter(business=OuterRef('pk')).order_by('-occurred_at', '-pk').values('occurred_at')[:1]),
+                                        Subquery(DemoOpen.objects.filter(business=OuterRef('pk')).order_by('-opened_at').values('opened_at')[:1])),
                  has_snapshot=Exists(PlaceSnapshot.objects.filter(business=OuterRef('pk'))),
                  snapshot_rating=Subquery(snapshots.values('rating')[:1]),
                  snapshot_reviews=Subquery(snapshots.values('reviews')[:1]),
@@ -399,32 +405,92 @@ def demo_url(business):
 def demo_context(business):
     if not has_demo(business):
         return {'demo_url': ''}
+    from .demo_codes import ensure_code, open_stats
     from .models import DemoVersion
-    return {'demo_url': demo_url(business), 'demo_version': latest(business),
+    ensure_code(business)
+    return {'demo_url': demo_url(business), 'demo_version': latest(business), 'demo_opens': open_stats(business),
             'demo_versions': DemoVersion.objects.filter(business=business).order_by('-number')[:5]}
 
 
 def serve_demo(business):
-    response = HttpResponse(read_demo(business), content_type='text/html; charset=utf-8')
+    from .demos import with_noindex
+    response = HttpResponse(with_noindex(read_demo(business)), content_type='text/html; charset=utf-8')
     for header, value in DEMO_HEADERS.items():
         response[header] = value
     return response
 
 
+def counts_as_visit(request):
+    """Us checking our own demo is not the business looking at it."""
+    return request.method == 'GET' and not (request.user.is_authenticated and request.user.role != 'client')
+
+
 def demo_by_slug(request, slug):
     """The public demo, /demos/<slug>/: no session needed, nothing else of the app reachable.
 
-    A missing slug and a business without a demo are the same 404.
+    A missing slug, a business without a demo and a discarded one are the same 404.
     """
-    b = Business.objects.filter(demo_slug=slug).first()
+    from .demo_codes import VIA_CODE_COOKIE, record_open
+    b = Business.objects.filter(demo_slug=slug).exclude(stage='discarded').first()
     if b is None or not has_demo(b):
         raise Http404
-    return serve_demo(b)
+    response = serve_demo(b)
+    if request.COOKIES.get(VIA_CODE_COOKIE):
+        # Already counted by /c/<code> a moment ago.
+        response.delete_cookie(VIA_CODE_COOKIE, path=f'/demos/{b.demo_slug}')
+    elif counts_as_visit(request):
+        record_open(b, 'direct')
+    return response
+
+
+def redeem_code(request, code):
+    """/c/<code>, where nndrei.dev/qr sends the code on the card.
+
+    Wrong, unknown, discarded or demo-less: one identical neutral page.
+    """
+    from django.conf import settings
+    from .demo_codes import VIA_CODE_COOKIE, redeem
+    business, limited = redeem(request, code)
+    if business is None:
+        response = render(request, 'core/code_invalid.html', {'limited': limited}, status=429 if limited else 404)
+    else:
+        response = redirect(demo_url(business))
+        response.set_cookie(VIA_CODE_COOKIE, '1', max_age=120, path=f'/demos/{business.demo_slug}',
+                            secure=settings.SESSION_COOKIE_SECURE, httponly=True, samesite='Lax')
+    response['Cache-Control'] = 'no-store'
+    response['Referrer-Policy'] = 'no-referrer'
+    return response
+
+
+def robots_txt(request):
+    # No sitemap and no paths: nothing here is announced. Crawling stays open so
+    # a crawler that finds a leaked link reads the noindex instead of listing it.
+    return HttpResponse('User-agent: *\nDisallow:\n', content_type='text/plain; charset=utf-8')
+
+
+@roles('admin')
+@require_POST
+def demo_code_regenerate(request, public_id):
+    from .demo_codes import ensure_code
+    b = scoped(Business, request.user, public_id)
+    old = b.demo_code
+    code = ensure_code(b, regenerate=True)
+    activity(b, 'demo_code', f'Código de tarjeta cambiado: {old or "—"} → {code}.', request.user, client_visible=False)
+    messages.success(request, f'Nuevo código: {code}. El anterior ya no abre la demo.')
+    return redirect(b)
+
+
+@roles('admin')
+def code_attempts(request):
+    """Recent wrong codes: typos on the card, or someone trying their luck."""
+    from .models import CodeAttempt
+    failed = CodeAttempt.objects.visible_to(request.user).filter(valid=False)[:200]
+    return render(request, 'core/code_attempts.html', {'title': 'Códigos de tarjeta', 'attempts': failed})
 
 
 def demo_public(request, public_id):
     """Old address (/clientes/<uuid>/demo-cliente/): links already sent keep working."""
-    b = Business.objects.filter(public_id=public_id).first()
+    b = Business.objects.filter(public_id=public_id).exclude(stage='discarded').first()
     if b is None or not has_demo(b):
         raise Http404
     from django.http import HttpResponsePermanentRedirect

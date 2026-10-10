@@ -352,3 +352,38 @@ table.clients td.cell-name{background:var(--surface)}
 .area-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .area-panel .actions form{margin:0}
 .m-sheet .city-options{position:static;box-shadow:none;border:1px solid var(--border);margin-top:4px}
+/* Card code: five hand-copied characters, so a monospace face with room between them. */
+.demo-code{display:inline-flex;align-items:center;min-height:22px;padding:1px 7px;margin-left:6px;border:1.5px dashed var(--purple-border);border-radius:7px;background:var(--purple);color:var(--purple-text);font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.12em;white-space:nowrap;vertical-align:middle}
+.demo-code-head{font-size:14px;min-height:26px;margin-left:2px}
+.demo-card-code{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--inset)}
+.demo-card-code>div{display:grid;gap:4px}.demo-code-big{font-size:26px;min-height:40px;padding:4px 12px;margin:0;letter-spacing:.22em}
+.demo-opens{margin:12px 0 0}
+/* Consultas from nndrei.dev */
+.visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.nav-count{margin-left:auto;min-width:22px;height:22px;padding:0 7px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--accent);color:#fff;font-size:12px;font-weight:700;line-height:1}
+.menu-list a>span.nav-count{flex:0 0 auto}
+.inq-new{--c:var(--purple);--b:var(--purple-border);--t:var(--purple-text)}
+.inq-read{--c:var(--gray);--b:var(--gray-border);--t:var(--gray-text)}
+.inq-replied{--c:var(--blue);--b:var(--blue-border);--t:var(--blue-text)}
+.inq-converted{--c:var(--green);--b:var(--green-border);--t:var(--green-text)}
+.inq-archived{--c:var(--inset);--b:var(--border);--t:var(--muted)}
+.inq-spam{--c:var(--pink);--b:var(--pink-border);--t:var(--pink-text)}
+.inq-card{--c:var(--peach);--b:var(--peach-border);--t:var(--peach-text)}
+table.inquiries tr.is-new td{font-weight:600}
+table.inquiries tr.is-new td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.list-card.is-new{border-color:var(--purple-border);box-shadow:inset 3px 0 0 var(--accent)}
+.inquiry-filters{margin-bottom:20px}
+dl.inquiry-fields{grid-template-columns:140px minmax(0,1fr);margin:0 0 16px}
+dl.inquiry-fields dt{color:var(--muted);font-weight:600}
+dl.inquiry-fields dd{margin:0;overflow-wrap:anywhere}
+.inquiry-message{margin:8px 0 0;padding:14px 16px;border-radius:14px;background:var(--inset);white-space:normal;overflow-wrap:anywhere}
+.inquiry-history{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.inquiry-matches{list-style:none;margin:8px 0 16px;padding:0;display:grid;gap:8px}
+.inquiry-matches li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px}
+.inquiry-matches form{margin:0}
+.inquiry-search{display:grid;gap:6px;margin-top:8px}
+.inquiry-reply form,.inquiry-status form{margin:0}
+.inquiry-reply button{display:inline-flex;align-items:center;gap:8px}
+.inquiry-status{margin-top:12px}
+.inquiry-danger button{display:inline-flex;align-items:center;gap:8px}
+@media(max-width:767px){dl.inquiry-fields{display:grid;grid-template-columns:1fr;gap:2px}dl.inquiry-fields dd{margin-bottom:10px}}
