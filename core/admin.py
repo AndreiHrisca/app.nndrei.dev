@@ -36,11 +36,11 @@ for model in apps.get_app_config('core').get_models():
     if model != User:
         admin.site.register(model, RestrictedAdmin)
 
-from .models import SearchZone,SearchCategory,Assignment,ClientMembership
+from .models import SearchArea,SearchCategory,Assignment,ClientMembership,TwoFactorPolicy,EstimationSettings
 class ConfigurationAdmin(RestrictedAdmin):
     def has_add_permission(self,request): return request.user.role=='admin'
     def has_change_permission(self,request,obj=None): return request.user.role=='admin'
     def has_delete_permission(self,request,obj=None): return request.user.role=='admin'
-for model in [SearchZone,SearchCategory,Assignment,ClientMembership]:
+for model in [SearchArea,SearchCategory,Assignment,ClientMembership,TwoFactorPolicy,EstimationSettings]:
     admin.site.unregister(model)
     admin.site.register(model,ConfigurationAdmin)

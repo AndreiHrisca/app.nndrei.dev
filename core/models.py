@@ -1,5 +1,6 @@
 import secrets
 import uuid
+from decimal import Decimal
 from datetime import timedelta
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -8,13 +9,17 @@ from django.db import models
 from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
+from . import labels
 
-ROLES = [('admin', 'Admin'), ('developer', 'Developer'), ('accountant', 'Contador'), ('client', 'Cliente')]
+ROLES = list(labels.ROLE_LABELS.items())
 # The single source of truth for the pipeline order: the tiles, the selects, the
 # filters, the table sorting and STAGE_TRANSITIONS all read their order from here.
 # 'discarded' stays last on purpose: it is a way out, not a step.
-STAGES = [('found', 'Encontrado'), ('profile_created', 'Ficha creada'), ('visited', 'Visitado'), ('proposal', 'Propuesta'), ('review', 'Revisión'), ('approved', 'Presupuesto aprobado'), ('development', 'Desarrollo'), ('testing', 'Pruebas'), ('production', 'Producción'), ('discarded', 'Descartado')]
+# Visible names come from core.labels.
+STAGES = [(key, labels.STAGE_LABELS[key]) for key in ['found', 'profile_created', 'demo_ready', 'visited', 'proposal', 'approved', 'development', 'testing', 'production', 'discarded']]
 STAGE_ORDER = {key: index for index, (key, _) in enumerate(STAGES)}
+# The stage history is immutable, so it keeps accepting (and naming) retired stages.
+STAGE_HISTORY_CHOICES = STAGES + list(labels.LEGACY_STAGE_LABELS.items())
 
 class PublicIdModel(models.Model):
     """Adds an opaque identifier for URLs so the integer primary key never leaves the server."""
@@ -75,7 +80,12 @@ class Business(PublicIdModel):
     phone = models.CharField('Teléfono', max_length=50, blank=True)
     email = models.EmailField(blank=True)
     contact = models.CharField('Persona de contacto', max_length=150, blank=True)
-    zone = models.CharField('Zona', max_length=150, blank=True)
+    # The fixed zone used before cities and neighbourhoods; kept for traceability, never filtered on.
+    legacy_zone = models.CharField('Zona antigua', max_length=150, blank=True)
+    city = models.ForeignKey('City', verbose_name='Ciudad', null=True, blank=True, on_delete=models.PROTECT, related_name='businesses')
+    neighbourhood = models.ForeignKey('Neighbourhood', verbose_name='Barrio', null=True, blank=True, on_delete=models.SET_NULL, related_name='businesses')
+    # When the address was last turned into coordinates (once; see core/geo.py).
+    geocoded_at = models.DateTimeField(null=True, blank=True)
     google_place_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     current_website = models.URLField('Web actual', blank=True)
     stage = models.CharField('Fase', max_length=30, choices=STAGES, default='found')
@@ -87,6 +97,27 @@ class Business(PublicIdModel):
     discarded_reason = models.TextField(blank=True)
     next_action = models.CharField('Próxima acción', max_length=200, blank=True)
     next_action_date = models.DateField('Fecha de la próxima acción', null=True, blank=True)
+    # Location and hours. Google data is cached for at most 30 days (see
+    # tasks.daily_maintenance); hand-typed hours are ours and never expire.
+    latitude = models.FloatField('Latitud', null=True, blank=True)
+    longitude = models.FloatField('Longitud', null=True, blank=True)
+    opening_hours = models.JSONField('Horario', null=True, blank=True, help_text='Periodos en el formato de Places API (New). Ver core/hours.py.')
+    hours_source = models.CharField('Origen del horario', max_length=10, blank=True, choices=[('google', 'Google'), ('manual', 'Manual')])
+    hours_updated_at = models.DateTimeField('Horario actualizado', null=True, blank=True)
+    # The last hours Google gave, kept apart so "Volver al horario de Google"
+    # works without calling the API again.
+    google_hours = models.JSONField(null=True, blank=True)
+    google_rating = models.FloatField(null=True, blank=True)
+    google_reviews = models.PositiveIntegerField(null=True, blank=True)
+    google_price_level = models.CharField(max_length=40, blank=True)
+    google_maps_url = models.URLField(max_length=1000, blank=True)
+    google_fetched_at = models.DateTimeField(null=True, blank=True)
+    # Public demo address, /demos/<slug>/: the name plus a random part, so it
+    # cannot be guessed from the business name.
+    demo_slug = models.SlugField(max_length=60, unique=True, null=True, blank=True)
+    # Five characters handwritten on the business card; nndrei.dev/qr sends it to
+    # /c/<code>. See core/demo_codes.py for the alphabet and the rules.
+    demo_code = models.CharField('Código de demo', max_length=5, unique=True, null=True, blank=True)
     objects = BusinessQuerySet.as_manager()
 
     def __str__(self):
@@ -94,6 +125,11 @@ class Business(PublicIdModel):
 
     def get_absolute_url(self):
         return reverse('business_detail', args=[self.public_id])
+
+    @property
+    def area_label(self):
+        """'Sol, Madrid', 'Salamanca' or ''. Lists select_related city and neighbourhood."""
+        return ', '.join(x for x in [self.neighbourhood.name if self.neighbourhood_id else '', self.city.name if self.city_id else ''] if x)
 
 class ClientMembership(models.Model):
     objects = AdminRecordQuerySet.as_manager()
@@ -174,6 +210,12 @@ class Study(PublicIdModel, BusinessOwned):
     notes = models.TextField('Notas del estudio', blank=True)
     created_at = models.DateTimeField('Fecha del estudio', auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Whatever Claude writes through MCP is a draft until a person validates it.
+    ai_draft = models.BooleanField('Borrador IA', default=False)
+    ai_updated_at = models.DateTimeField('Escrito por la IA', null=True, blank=True)
+    ai_sources = models.JSONField('Fuentes', default=list, blank=True)
+    validated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
+    validated_at = models.DateTimeField(null=True, blank=True)
 
     # The two answers that have to exist before a visit is worth booking. The same
     # rule gates the stage button and the indicator in the Clientes table.
@@ -200,7 +242,7 @@ class Document(PublicIdModel, BusinessOwned):
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
-REQUEST_STATES = [('requested','Solicitada'),('accepted','Aceptada'),('in_progress','En desarrollo'),('testing','En pruebas'),('production','En producción'),('rejected','Rechazada')]
+REQUEST_STATES = list(labels.REQUEST_STATE_LABELS.items())
 
 class Request(PublicIdModel, BusinessOwned):
     title = models.CharField('Título', max_length=200)
@@ -240,8 +282,8 @@ class ActivityEvent(BusinessOwned):
         raise ValueError('Audit records cannot be deleted.')
 
 class StageChange(BusinessOwned):
-    from_stage = models.CharField(max_length=30,choices=STAGES)
-    to_stage = models.CharField(max_length=30,choices=STAGES)
+    from_stage = models.CharField(max_length=30,choices=STAGE_HISTORY_CHOICES)
+    to_stage = models.CharField(max_length=30,choices=STAGE_HISTORY_CHOICES)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
     occurred_at = models.DateTimeField(default=timezone.now)
     objects = ImmutableQuerySet.as_manager()
@@ -337,17 +379,104 @@ class Visit(BusinessOwned):
     visitor = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
     result = models.CharField('Resultado',max_length=200)
     notes = models.TextField('Notas',blank=True)
+    talked_to = models.CharField('Con quién hablé',max_length=150,blank=True)
+    next_step = models.CharField('Próximo paso',max_length=300,blank=True)
+    followup_date = models.DateField('Fecha de seguimiento',null=True,blank=True)
+    # The pending action the visit created, so it shows in "Próximas acciones".
+    followup = models.ForeignKey('FollowUp',null=True,blank=True,on_delete=models.SET_NULL)
 
 class AdminQuerySet(models.QuerySet):
     def visible_to(self,user):
         return self.all() if user.is_authenticated and user.role=='admin' else self.none()
 
-class SearchZone(models.Model):
+# --- Geography: municipalities (INE), neighbourhoods and the areas we search ------
+
+class City(models.Model):
+    """A Spanish municipality from the INE register. Location and outline come from
+    OpenStreetMap the first time the city is used, and are kept (core/geo_sources.py)."""
+    ine_code = models.CharField('Código INE', max_length=5, unique=True)
+    name = models.CharField('Nombre', max_length=150)
+    search_name = models.CharField(max_length=150, db_index=True)
+    province = models.CharField('Provincia', max_length=60)
+    community = models.CharField('Comunidad', max_length=60)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    bbox = models.JSONField(null=True, blank=True, help_text='[sur, oeste, norte, este]')
+    geometry = models.JSONField(null=True, blank=True, help_text='GeoJSON (Polygon o MultiPolygon), lon/lat.')
+    osm_relation = models.BigIntegerField(null=True, blank=True)
+    geocoded_at = models.DateTimeField(null=True, blank=True)
+    neighbourhoods_fetched_at = models.DateTimeField(null=True, blank=True)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Ciudad'
+        verbose_name_plural = 'Ciudades'
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.province})'
+
+
+class Neighbourhood(models.Model):
+    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='neighbourhoods')
+    name = models.CharField('Nombre', max_length=150)
+    search_name = models.CharField(max_length=150, db_index=True)
+    district = models.CharField('Distrito', max_length=150, blank=True)
+    source = models.CharField(max_length=10, choices=[('madrid', 'Ayuntamiento de Madrid'), ('osm', 'OpenStreetMap')])
+    external_id = models.CharField(max_length=60)
+    bbox = models.JSONField(help_text='[sur, oeste, norte, este]')
+    geometry = models.JSONField(null=True, blank=True)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Barrio'
+        ordering = ['name']
+        constraints = [models.UniqueConstraint(fields=['city', 'source', 'external_id'], name='unique_neighbourhood')]
+
+    def __str__(self):
+        return self.name
+
+
+class SearchArea(models.Model):
+    """A city, or one of its neighbourhoods, searched in Google. Active ones are what
+    "Actualizar" goes through; inactive ones keep their businesses but are not refreshed."""
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name='search_areas')
+    neighbourhood = models.ForeignKey(Neighbourhood, null=True, blank=True, on_delete=models.CASCADE, related_name='search_areas')
+    active = models.BooleanField('Activa', default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Zona de búsqueda'
+        verbose_name_plural = 'Zonas de búsqueda'
+        constraints = [
+            models.UniqueConstraint(fields=['city', 'neighbourhood'], name='unique_search_area'),
+            models.UniqueConstraint(fields=['city'], condition=models.Q(neighbourhood__isnull=True), name='unique_whole_city_area'),
+        ]
+
+    def __str__(self):
+        return f'{self.neighbourhood.name}, {self.city.name}' if self.neighbourhood_id else f'{self.city.name} (toda la ciudad)'
+
+
+class ExternalCall(models.Model):
+    """Last call to a rate-limited service (Nominatim, Overpass), shared by every process."""
+    service = models.CharField(max_length=30, primary_key=True)
+    last_at = models.DateTimeField()
+
+
+class LegacySearchZone(models.Model):
+    """The fixed zones (a point and a radius) used before cities and neighbourhoods.
+
+    Kept for traceability. `setup_geography` turns each active one into an active
+    search area for the official neighbourhood that contains its centre.
+    """
     name = models.CharField('Nombre',max_length=150,unique=True)
     latitude = models.FloatField('Latitud',null=True,blank=True)
     longitude = models.FloatField('Longitud',null=True,blank=True)
-    radius = models.PositiveIntegerField('Radio (m)',default=1000)
     active = models.BooleanField('Activa',default=True)
+    resolved_area = models.ForeignKey('SearchArea',null=True,blank=True,on_delete=models.SET_NULL)
     objects = AdminQuerySet.as_manager()
     def __str__(self): return self.name
 
@@ -374,14 +503,38 @@ class PlaceSnapshot(PublicIdModel):
     maps_url = models.URLField(blank=True,max_length=1000)
     business_status = models.CharField(max_length=40,default='OPERATIONAL')
     fetched_at = models.DateTimeField(default=timezone.now)
-    zone = models.ForeignKey(SearchZone,on_delete=models.PROTECT)
     category = models.ForeignKey(SearchCategory,on_delete=models.PROTECT)
     opportunity_score = models.PositiveSmallIntegerField(default=0)
-    status = models.CharField(max_length=20,choices=[('new','Nuevo'),('pipeline','En pipeline'),('discarded','Descartado')],default='new')
+    status = models.CharField(max_length=20,choices=[('new','Nuevo'),('pipeline',labels.OPPORTUNITY_IN_PIPELINE),('discarded','Descartado')],default='new')
     notes = models.TextField(blank=True)
     business = models.ForeignKey(Business,null=True,blank=True,on_delete=models.PROTECT)
-    distance_m = models.PositiveIntegerField(default=0)
+    city = models.ForeignKey(City,null=True,blank=True,on_delete=models.PROTECT)
+    neighbourhood = models.ForeignKey(Neighbourhood,null=True,blank=True,on_delete=models.SET_NULL)
+    latitude = models.FloatField(null=True,blank=True)
+    longitude = models.FloatField(null=True,blank=True)
+    opening_hours = models.JSONField(null=True,blank=True)
+    price_level = models.CharField(max_length=40,blank=True)
     objects = AdminQuerySet.as_manager()
+
+    @property
+    def area_label(self):
+        return ', '.join(x for x in [self.neighbourhood.name if self.neighbourhood_id else '', self.city.name if self.city_id else ''] if x)
+
+class SearchSlice(models.Model):
+    """When an area × category pair was last asked to Google.
+
+    "Actualizar" skips pairs fetched in the last PLACES_REFRESH_MIN_DAYS, so
+    pressing it twice does not spend the monthly quota twice.
+    """
+    area = models.ForeignKey(SearchArea,on_delete=models.CASCADE)
+    category = models.ForeignKey(SearchCategory,on_delete=models.CASCADE)
+    # Set when every cell has been searched. A search cut short by the budget leaves it
+    # empty and remembers the next cell, so the following run carries on from there.
+    fetched_at = models.DateTimeField(null=True,blank=True)
+    next_cell = models.PositiveIntegerField(default=0)
+    objects = AdminQuerySet.as_manager()
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['area','category'],name='unique_search_area_slice')]
 
 class PlacesUsage(models.Model):
     month = models.DateField(unique=True)
@@ -398,7 +551,7 @@ class SearchRun(PublicIdModel):
     objects = AdminQuerySet.as_manager()
 
 PERIODS=[('once','Única'),('monthly','Mensual'),('annual','Anual')]
-CATEGORIES=[('development','Desarrollo'),('maintenance','Mantenimiento'),('domain','Dominio'),('hosting','Hosting'),('tools','Herramientas'),('materials','Material'),('commission','Comisión'),('tax','Impuestos'),('other','Otro')]
+CATEGORIES=[('development','Desarrollo'),('maintenance','Mantenimiento'),('domain','Dominio'),('hosting',labels.HOSTING),('tools','Herramientas'),('materials','Material'),('commission','Comisión'),('tax','Impuestos'),('other','Otro')]
 
 class ChargeQuerySet(ScopedQuerySet):
     def visible_to(self,user):
@@ -488,4 +641,311 @@ class EmailOutbox(models.Model):
     sent_at=models.DateTimeField(null=True,blank=True)
     attempts=models.PositiveIntegerField(default=0)
     last_error=models.TextField(blank=True)
+    # Login links: sent from the queue (so the response takes the same time
+    # whether or not the email exists) and their URL is wiped once sent or expired.
+    sensitive_until=models.DateTimeField(null=True,blank=True)
 
+
+# --- Access: 2FA policy per role, remembered devices, email login links --------
+
+TWO_FACTOR_POLICIES = [('required', 'Obligatoria'), ('optional', 'Opcional'), ('disabled', 'Desactivada')]
+# Used when a role has no row yet. The app stores links to clients' credentials,
+# so admins must use a second step by default.
+DEFAULT_TWO_FACTOR = {'admin': 'required', 'developer': 'optional', 'accountant': 'optional', 'client': 'disabled'}
+
+
+class TwoFactorPolicy(models.Model):
+    role = models.CharField('Rol', max_length=20, choices=ROLES, unique=True)
+    policy = models.CharField('Verificación en dos pasos', max_length=10, choices=TWO_FACTOR_POLICIES)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Política de verificación en dos pasos'
+        verbose_name_plural = 'Políticas de verificación en dos pasos'
+
+    def __str__(self):
+        return f'{self.get_role_display()}: {self.get_policy_display()}'
+
+    @classmethod
+    def for_role(cls, role):
+        return cls.objects.filter(role=role).values_list('policy', flat=True).first() or DEFAULT_TWO_FACTOR.get(role, 'required')
+
+
+class OwnRecordQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        return self.filter(user=user) if user.is_authenticated else self.none()
+
+
+class TrustedDevice(PublicIdModel):
+    """A browser that skips the second step for a while. Only the token's hash is stored."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='trusted_devices')
+    token_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField('Dispositivo', max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    objects = OwnRecordQuerySet.as_manager()
+
+
+class LoginToken(models.Model):
+    """One-use email login link. Only the token's hash is stored."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='login_tokens')
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class LoginLinkRequest(models.Model):
+    """Every request for a link, known email or not, so the limits say nothing about who exists."""
+    email = models.EmailField()
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    objects = AdminRecordQuerySet.as_manager()
+
+
+# --- Revenue estimate (internal: admin only) -------------------------------------
+
+def default_price_tickets():
+    return {'PRICE_LEVEL_INEXPENSIVE': 10, 'PRICE_LEVEL_MODERATE': 20, 'PRICE_LEVEL_EXPENSIVE': 35, 'PRICE_LEVEL_VERY_EXPENSIVE': 60}
+
+
+def default_concurrency():
+    return {'low': 30, 'medium': 55, 'high': 80}
+
+
+class EstimationSettings(models.Model):
+    """The assumptions behind every estimate, edited in /admin/. One row."""
+    review_rate = models.DecimalField('Tasa de reseña (central)', max_digits=5, decimal_places=4, default=Decimal('0.02'), help_text='Parte de los clientes que deja reseña. Es la hipótesis más débil.')
+    review_rate_low = models.DecimalField('Tasa de reseña baja', max_digits=5, decimal_places=4, default=Decimal('0.01'), help_text='Da la cifra alta.')
+    review_rate_high = models.DecimalField('Tasa de reseña alta', max_digits=5, decimal_places=4, default=Decimal('0.04'), help_text='Da la cifra baja.')
+    price_level_tickets = models.JSONField('Ticket por nivel de precios de Google (€)', default=default_price_tickets)
+    concurrency_occupancy = models.JSONField('Ocupación por concurrencia observada (%)', default=default_concurrency, help_text='Se usa si no se anota la ocupación.')
+    small_max = models.DecimalField('Pequeño: facturación mensual por debajo de (€)', max_digits=12, decimal_places=2, default=Decimal('15000'))
+    medium_max = models.DecimalField('Mediano: facturación mensual por debajo de (€)', max_digits=12, decimal_places=2, default=Decimal('60000'))
+    budget_min = models.DecimalField('Presupuesto mínimo (€)', max_digits=10, decimal_places=2, default=Decimal('1000'))
+    budget_max = models.DecimalField('Presupuesto máximo (€)', max_digits=10, decimal_places=2, default=Decimal('3000'))
+    gross_margin = models.DecimalField('Margen bruto', max_digits=4, decimal_places=3, default=Decimal('0.30'))
+    delivery_commission = models.DecimalField('Comisión de las apps de reparto', max_digits=4, decimal_places=3, default=Decimal('0.30'))
+    payback_months = models.PositiveSmallIntegerField('Meses para amortizar la web', default=12)
+    objects = AdminQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = 'Ajustes de la estimación'
+        verbose_name_plural = 'Ajustes de la estimación'
+
+    def __str__(self):
+        return 'Ajustes de la estimación'
+
+    @classmethod
+    def load(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+    def as_settings(self):
+        from .estimation import Settings
+        return Settings(**{f: getattr(self, f) for f in ['review_rate', 'review_rate_low', 'review_rate_high', 'price_level_tickets', 'concurrency_occupancy',
+                                                         'small_max', 'medium_max', 'budget_min', 'budget_max', 'gross_margin', 'delivery_commission', 'payback_months']})
+
+
+class EstimationQuerySet(ScopedQuerySet):
+    def visible_to(self, user):
+        return super().visible_to(user) if user.is_authenticated and user.role == 'admin' else self.none()
+
+
+class Estimation(PublicIdModel, BusinessOwned):
+    """One estimate, kept as history: inputs, result and the assumptions used."""
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT)
+    source = models.CharField(max_length=10, choices=[('web', 'Web'), ('mcp', 'Claude (MCP)')], default='web')
+    # Inputs
+    reviews = models.PositiveIntegerField('Reseñas totales', null=True, blank=True)
+    rating = models.DecimalField('Nota', max_digits=2, decimal_places=1, null=True, blank=True)
+    years = models.DecimalField('Antigüedad (años)', max_digits=5, decimal_places=1, null=True, blank=True)
+    ticket = models.DecimalField('Ticket medio por persona (€)', max_digits=8, decimal_places=2, null=True, blank=True, help_text='Vacío: se deduce del nivel de precios de Google.')
+    price_level = models.CharField('Nivel de precios de Google', max_length=40, blank=True)
+    tables = models.PositiveSmallIntegerField('Mesas', null=True, blank=True)
+    people_per_table = models.DecimalField('Personas por mesa', max_digits=4, decimal_places=1, null=True, blank=True)
+    services = models.JSONField('Servicios', default=list, blank=True)
+    rotations = models.DecimalField('Rotaciones por servicio', max_digits=4, decimal_places=1, null=True, blank=True)
+    days_per_week = models.PositiveSmallIntegerField('Días abiertos por semana', null=True, blank=True)
+    occupancy_pct = models.DecimalField('Ocupación media observada (%)', max_digits=5, decimal_places=1, null=True, blank=True)
+    concurrency = models.CharField('Concurrencia en la visita', max_length=10, blank=True, choices=[('low', 'Baja'), ('medium', 'Media'), ('high', 'Alta')])
+    declared_annual = models.DecimalField('Facturación anual declarada (€)', max_digits=14, decimal_places=2, null=True, blank=True)
+    declared_source = models.CharField('Fuente de la facturación declarada', max_length=200, blank=True)
+    uses_delivery = models.BooleanField('Usa apps de reparto', default=False)
+    # Result
+    monthly_low = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    monthly_mid = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    monthly_high = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    confidence = models.CharField(max_length=10, choices=[('low', 'Baja'), ('medium', 'Media'), ('high', 'Alta')])
+    band = models.CharField(max_length=10, blank=True, choices=[('small', 'Pequeño'), ('medium', 'Mediano'), ('large', 'Grande')])
+    suggested_budget = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    used_ticket = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    explanation = models.JSONField(default=list)
+    payback = models.JSONField(default=dict)
+    assumptions = models.JSONField(default=dict)
+    objects = EstimationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at', '-pk']
+
+
+# --- Demo versions ----------------------------------------------------------------
+
+class DemoVersion(BusinessOwned):
+    """Every demo ever published for a business; the newest one is the public one."""
+    number = models.PositiveIntegerField()
+    filename = models.CharField(max_length=120)
+    path = models.CharField(max_length=200)
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    source = models.CharField(max_length=10, choices=[('web', 'Web'), ('mcp', 'Claude (MCP)')], default='web')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-number']
+        constraints = [models.UniqueConstraint(fields=['business', 'number'], name='unique_demo_version')]
+
+
+class DemoOpen(BusinessOwned):
+    """One visit to the public demo, by card code or by its address."""
+    via = models.CharField(max_length=10, choices=[('code', 'Código'), ('direct', 'URL directa')])
+    opened_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-opened_at']
+
+
+class CodeAttempt(models.Model):
+    """Every code typed at /c/<code>, right or wrong. The address is kept only as a keyed hash."""
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    code = models.CharField(max_length=40)
+    valid = models.BooleanField(default=False)
+    rate_limited = models.BooleanField(default=False)
+    ip_hash = models.CharField(max_length=64)
+    user_agent = models.CharField(max_length=300, blank=True)
+    business = models.ForeignKey(Business, null=True, blank=True, on_delete=models.SET_NULL)
+    objects = AdminRecordQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['ip_hash', 'created_at'], name='codeattempt_ip_recent')]
+
+
+# --- MCP connector: OAuth 2.1 state (Claude.ai registers itself by DCR) ------------
+
+class McpClient(models.Model):
+    client_id = models.CharField(max_length=255, unique=True)
+    info = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = AdminRecordQuerySet.as_manager()
+
+    @property
+    def name(self):
+        return self.info.get('client_name') or 'Cliente MCP'
+
+
+class McpAuthRequest(models.Model):
+    """An /authorize waiting for an admin to approve it in the web app."""
+    txn = models.CharField(max_length=64, unique=True)
+    client_id = models.CharField(max_length=255)
+    params = models.JSONField()
+    expires_at = models.DateTimeField()
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class McpCode(models.Model):
+    code_hash = models.CharField(max_length=64, unique=True)
+    client_id = models.CharField(max_length=255)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    params = models.JSONField()
+    expires_at = models.FloatField()
+    objects = AdminRecordQuerySet.as_manager()
+
+
+class McpTokenQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        return self.filter(user=user) if user.is_authenticated and user.role == 'admin' else self.none()
+
+
+class McpToken(models.Model):
+    """Access and refresh tokens, by hash. A grant is one approved connection."""
+    token_hash = models.CharField(max_length=64, unique=True)
+    kind = models.CharField(max_length=10, choices=[('access', 'Acceso'), ('refresh', 'Renovación')])
+    grant_id = models.CharField(max_length=64, db_index=True)
+    client_id = models.CharField(max_length=255)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mcp_tokens')
+    scopes = models.JSONField(default=list)
+    resource = models.CharField(max_length=500, blank=True)
+    expires_at = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    objects = McpTokenQuerySet.as_manager()
+
+
+# --- Consultas: the nndrei.dev/hablamos form ------------------------------------
+# portfolio-api only keeps a mailbox; core/inquiry_sync.py moves every message here
+# and empties it. From then on the app owns the data (see README, "Consultas").
+
+INQUIRY_STATUSES = [(key, labels.INQUIRY_STATUS_LABELS[key]) for key in ['new', 'read', 'replied', 'converted', 'archived', 'spam']]
+INQUIRY_RETENTION_DAYS = 180
+
+
+class Inquiry(PublicIdModel):
+    # The form's request_id, or a hash of date + email + message when it has none:
+    # what makes the sync safe to repeat.
+    sync_key = models.CharField(max_length=64, unique=True, editable=False)
+    received_at = models.DateTimeField('Recibida', db_index=True)
+    name = models.CharField('Nombre', max_length=100)
+    email = models.EmailField('Email', max_length=254)
+    phone = models.CharField('Teléfono', max_length=40, blank=True)
+    business_name = models.CharField('Negocio', max_length=160, blank=True)
+    need = models.CharField('Qué necesita', max_length=80, blank=True)
+    message = models.TextField('Mensaje')
+    budget = models.CharField('Presupuesto', max_length=100, blank=True)
+    source = models.CharField('Campaña', max_length=20, blank=True)
+    origin_page = models.CharField('Página de origen', max_length=64, blank=True)
+    status = models.CharField('Estado', max_length=12, choices=INQUIRY_STATUSES, default='new', db_index=True)
+    status_changed_at = models.DateTimeField(null=True, blank=True)
+    internal_notes = models.TextField('Notas internas', blank=True)
+    # Converted inquiries live as long as the client card does.
+    business = models.ForeignKey(Business, verbose_name='Cliente', null=True, blank=True, on_delete=models.CASCADE, related_name='inquiries')
+    created_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    notify_attempts = models.PositiveSmallIntegerField(default=0)
+    objects = AdminRecordQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['-received_at', '-pk']
+
+    def __str__(self):
+        return f'{self.name} · {self.business_name}' if self.business_name else self.name
+
+    def get_absolute_url(self):
+        return reverse('inquiry_detail', args=[self.public_id])
+
+    @property
+    def origin_kind(self):
+        """'card' (card or QR), 'campaign' or 'web': the three filters of the list."""
+        if self.source == 'card' or self.origin_page == '/qr':
+            return 'card'
+        return 'web' if self.source in ('', 'direct') else 'campaign'
+
+    def get_origin_display(self):
+        return labels.INQUIRY_ORIGIN_LABELS[self.origin_kind]
+
+
+class InquiryStatusChange(models.Model):
+    """Status history of one inquiry. It goes with the inquiry when that is deleted."""
+    inquiry = models.ForeignKey(Inquiry, on_delete=models.CASCADE, related_name='changes')
+    from_status = models.CharField(max_length=12, choices=INQUIRY_STATUSES, blank=True)
+    to_status = models.CharField(max_length=12, choices=INQUIRY_STATUSES)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    note = models.CharField(max_length=200, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['occurred_at', 'pk']

@@ -1,4 +1,5 @@
 from django.shortcuts import redirect, render
+from . import labels
 from .access import scoped
 from .auth_views import roles
 from .models import Business, ClientCharge, Proposal, ProposalVersion
@@ -17,7 +18,22 @@ def businesses(request):
     context = business_list_context(request)
     # The search box and the filters swap only the table, not the whole page.
     partial = request.headers.get('HX-Request') and not request.headers.get('HX-Boosted')
-    return render(request, 'core/business_table.html' if partial else 'core/list.html', context)
+    response = render(request, 'core/business_table.html' if partial else 'core/list.html', context)
+    if partial and ('lat' in request.GET or 'lng' in request.GET):
+        # Where you are standing never reaches the address bar or the history.
+        query = request.GET.copy()
+        query.pop('lat', None); query.pop('lng', None)
+        response['HX-Push-Url'] = request.path + ('?' + query.urlencode() if query else '')
+    return response
+
+
+def near_point(request):
+    """The browser's position for "Cerca de mí", or None if absent or nonsense."""
+    try:
+        lat, lng = float(request.GET['lat']), float(request.GET['lng'])
+    except (KeyError, ValueError):
+        return None
+    return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -35,8 +51,10 @@ def business_create(request):
     if request.method == 'POST' and form.is_valid():
         item = form.save()
         activity(item,'created','Ficha de negocio creada.',request.user,client_visible=False)
+        from .geo_sources import queue_placing
+        queue_placing(item)
         return redirect(item)
-    return render(request,'core/form.html',{'form':form,'title':'Nuevo lead'})
+    return render(request,'core/form.html',{'form':form,'title':labels.NEW_BUSINESS_TITLE})
 
 @roles('admin','developer','accountant')
 def business_detail(request,public_id):
@@ -49,6 +67,15 @@ def business_detail(request,public_id):
     context['transitions']=[(k,v) for k,v in STAGES if k in STAGE_TRANSITIONS.get(b.stage,set())]
     from .models import StageChange
     context['stage_changes']=StageChange.objects.visible_to(request.user).filter(business=b).order_by('occurred_at')
+    context['request_labels']=labels.REQUEST_STATE_LABELS
+    from .hours_views import hours_context
+    context.update(hours_context(request.user,b))
+    from .forms import VisitLogForm
+    from .visits import directions
+    context.update({'go':directions(b),'visit_form':VisitLogForm(),'visit_results':labels.VISIT_RESULTS})
+    if request.user.role=='admin':
+        from .estimation_views import estimation_context
+        context.update(estimation_context(request.user,b))
     return render(request,'core/business.html',context)
 
 def business_context(request,b,preview=False):
@@ -69,7 +96,16 @@ def business_edit(request,public_id):
     b = scoped(Business,request.user,public_id)
     form = BusinessForm(request.POST or None,instance=b)
     if request.method == 'POST' and form.is_valid():
-        form.save()
+        item = form.save(commit=False)
+        if 'address' in form.changed_data:
+            item.latitude = item.longitude = item.geocoded_at = None
+            item.neighbourhood = None
+            # The old Google identifier and snapshot point at the previous address.
+            item.google_place_id = None
+        item.save()
+        if 'address' in form.changed_data or item.city_id is None:
+            from .geo_sources import queue_placing
+            queue_placing(item)
         return redirect(b)
     return render(request,'core/form.html',{'form':form,'title':'Editar '+b.name})
 
@@ -189,7 +225,8 @@ def request_plan(request,public_id):
 # --- Clientes: one worked table instead of three bare columns -----------------
 
 from django.db.models import Case, Exists, IntegerField, OuterRef, Subquery, Value, When
-from .models import PlaceSnapshot, SearchCategory, STAGES, STAGE_ORDER
+from django.db.models.functions import Greatest
+from .models import DemoOpen, PlaceSnapshot, SearchCategory, STAGES, STAGE_ORDER
 
 # Header key -> field the queryset is ordered by. Anything else is ignored, so
 # the sort parameter can never reach the ORM as a raw field name.
@@ -200,9 +237,11 @@ def business_list_context(request):
     snapshots = PlaceSnapshot.objects.filter(business=OuterRef('pk')).order_by('-fetched_at')
     versions = ProposalVersion.objects.filter(proposal__business=OuterRef('pk')).order_by('-proposal_id', '-number')
     items = (Business.objects.visible_to(request.user)
-             .select_related('category')
+             .select_related('category', 'city', 'neighbourhood')
              .annotate(
-                 last_activity=Subquery(ActivityEvent.objects.filter(business=OuterRef('pk')).order_by('-occurred_at', '-pk').values('occurred_at')[:1]),
+                 # GREATEST skips NULLs: whichever happened last, a history line or a demo open.
+                 last_activity=Greatest(Subquery(ActivityEvent.objects.filter(business=OuterRef('pk')).order_by('-occurred_at', '-pk').values('occurred_at')[:1]),
+                                        Subquery(DemoOpen.objects.filter(business=OuterRef('pk')).order_by('-opened_at').values('opened_at')[:1])),
                  has_snapshot=Exists(PlaceSnapshot.objects.filter(business=OuterRef('pk'))),
                  snapshot_rating=Subquery(snapshots.values('rating')[:1]),
                  snapshot_reviews=Subquery(snapshots.values('reviews')[:1]),
@@ -221,6 +260,9 @@ def business_list_context(request):
     stage = request.GET.get('stage', '')
     if stage in dict(STAGES):
         items = items.filter(stage=stage)
+    else:
+        # Discarded businesses are out of the way unless asked for by their stage.
+        items = items.exclude(stage='discarded')
     category = request.GET.get('category', '')
     if category.isdigit():
         items = items.filter(category_id=category)
@@ -231,11 +273,31 @@ def business_list_context(request):
     ordering = ('-' if descending else '') + field
     # Businesses with no activity or no planned action sort last either way.
     items = items.order_by(nulls_last(ordering), 'name' if field != 'name' else 'pk')
-    return {'title': 'Clientes', 'businesses': items, 'query': query,
+    # Hours and distance are worked out here, in Python: the list is short and
+    # unpaginated, and "open now" depends on each business's own week.
+    from .hours import format_distance, hours_status
+    from .places import distance_m
+    from django.utils import timezone
+    now = timezone.now()
+    point = near_point(request) if sort == 'cerca' else None
+    open_now = request.GET.get('abierto') == '1'
+    rows = list(items)
+    for b in rows:
+        b.hours_state = hours_status(b.opening_hours, now)
+        b.distance = distance_m(point[0], point[1], b.latitude, b.longitude) if point and b.latitude is not None and b.longitude is not None else None
+        b.distance_text = format_distance(b.distance)
+    if open_now:
+        rows = [b for b in rows if b.hours_state.is_open]
+    if point:
+        # Businesses without coordinates keep their order, after the located ones.
+        rows.sort(key=lambda b: (b.distance is None, b.distance or 0))
+    if sort == 'cerca':
+        key, descending = 'cerca', False
+    return {'title': 'Clientes', 'businesses': rows, 'open_now': open_now, 'near': bool(point), 'clients_subtitle': labels.CLIENTS_SUBTITLE, 'query': query,
             'show_study': request.user.role in STUDY_ROLES,
             'stages': STAGES, 'stage': stage,
             'categories': SearchCategory.objects.filter(active=True).order_by('name'), 'category': category,
-            'sort': ('-' if descending else '') + key,
+            'sort': ('-' if descending else '') + key if key != 'cerca' else 'cerca',
             # Clicking the current column flips the direction; any other column starts ascending.
             'sort_toggles': {name: ('-' + name if name == key and not descending else name) for name in BUSINESS_SORTS},
             'sort_arrows': {name: ('▼' if descending else '▲') if name == key else '' for name in BUSINESS_SORTS}}
@@ -291,6 +353,21 @@ def study(request, public_id):
     return study_card(request, b, item, StudyForm(instance=item))
 
 
+@roles(*STUDY_ROLES)
+@require_POST
+def study_validate(request, public_id):
+    """"Validar estudio": a person has read the AI draft and takes it as theirs."""
+    from django.utils import timezone
+    b = scoped(Business, request.user, public_id)
+    with transaction.atomic():
+        item = Study.objects.visible_to(request.user).select_for_update().filter(business=b).first()
+        if item is not None and item.ai_draft:
+            item.ai_draft, item.validated_by, item.validated_at = False, request.user, timezone.now()
+            item.save(update_fields=['ai_draft', 'validated_by', 'validated_at', 'updated_at'])
+            activity(b, 'study_validated', 'Estudio validado (era un borrador de la IA).', request.user, item, client_visible=False)
+    return study_card(request, b, item) if request.headers.get('HX-Request') else redirect(b)
+
+
 # --- Phone screens -------------------------------------------------------------
 
 @roles('admin', 'developer', 'accountant', 'client')
@@ -314,28 +391,122 @@ def business_note(request, public_id):
 # --- Demo: a self-contained HTML mockup to show the client --------------------
 
 from django.http import HttpResponse
-from .demos import DEMO_HEADERS, delete_demo, has_demo, read_demo, save_demo
+from .demos import DEMO_HEADERS, DemoError, delete_demo, has_demo, latest, qr_png, read_demo, save_demo
 from .forms import DemoForm
 
 
-def demo_context(business):
+def demo_url(business):
     from django.conf import settings
     from django.urls import reverse
-    url = settings.SITE_URL + reverse('demo_public', args=[business.public_id]) if has_demo(business) else ''
-    return {'demo_url': url}
+    from .demos import ensure_slug
+    return settings.SITE_URL + reverse('demo_slug', args=[ensure_slug(business)])
+
+
+def demo_context(business):
+    if not has_demo(business):
+        return {'demo_url': ''}
+    from .demo_codes import ensure_code, open_stats
+    from .models import DemoVersion
+    ensure_code(business)
+    return {'demo_url': demo_url(business), 'demo_version': latest(business), 'demo_opens': open_stats(business),
+            'demo_versions': DemoVersion.objects.filter(business=business).order_by('-number')[:5]}
+
+
+def serve_demo(business):
+    from .demos import with_noindex
+    response = HttpResponse(with_noindex(read_demo(business)), content_type='text/html; charset=utf-8')
+    for header, value in DEMO_HEADERS.items():
+        response[header] = value
+    return response
+
+
+def counts_as_visit(request):
+    """Us checking our own demo is not the business looking at it."""
+    return request.method == 'GET' and not (request.user.is_authenticated and request.user.role != 'client')
+
+
+def demo_by_slug(request, slug):
+    """The public demo, /demos/<slug>/: no session needed, nothing else of the app reachable.
+
+    A missing slug, a business without a demo and a discarded one are the same 404.
+    """
+    from .demo_codes import VIA_CODE_COOKIE, record_open
+    b = Business.objects.filter(demo_slug=slug).exclude(stage='discarded').first()
+    if b is None or not has_demo(b):
+        raise Http404
+    response = serve_demo(b)
+    if request.COOKIES.get(VIA_CODE_COOKIE):
+        # Already counted by /c/<code> a moment ago.
+        response.delete_cookie(VIA_CODE_COOKIE, path=f'/demos/{b.demo_slug}')
+    elif counts_as_visit(request):
+        record_open(b, 'direct')
+    return response
+
+
+def redeem_code(request, code):
+    """/c/<code>, where nndrei.dev/qr sends the code on the card.
+
+    Wrong, unknown, discarded or demo-less: one identical neutral page.
+    """
+    from django.conf import settings
+    from .demo_codes import VIA_CODE_COOKIE, redeem
+    business, limited = redeem(request, code)
+    if business is None:
+        response = render(request, 'core/code_invalid.html', {'limited': limited}, status=429 if limited else 404)
+    else:
+        response = redirect(demo_url(business))
+        response.set_cookie(VIA_CODE_COOKIE, '1', max_age=120, path=f'/demos/{business.demo_slug}',
+                            secure=settings.SESSION_COOKIE_SECURE, httponly=True, samesite='Lax')
+    response['Cache-Control'] = 'no-store'
+    response['Referrer-Policy'] = 'no-referrer'
+    return response
+
+
+def robots_txt(request):
+    # No sitemap and no paths: nothing here is announced. Crawling stays open so
+    # a crawler that finds a leaked link reads the noindex instead of listing it.
+    return HttpResponse('User-agent: *\nDisallow:\n', content_type='text/plain; charset=utf-8')
+
+
+@roles('admin')
+@require_POST
+def demo_code_regenerate(request, public_id):
+    from .demo_codes import ensure_code
+    b = scoped(Business, request.user, public_id)
+    old = b.demo_code
+    code = ensure_code(b, regenerate=True)
+    activity(b, 'demo_code', f'Código de tarjeta cambiado: {old or "—"} → {code}.', request.user, client_visible=False)
+    messages.success(request, f'Nuevo código: {code}. El anterior ya no abre la demo.')
+    return redirect(b)
+
+
+@roles('admin')
+def code_attempts(request):
+    """Recent wrong codes: typos on the card, or someone trying their luck."""
+    from .models import CodeAttempt
+    failed = CodeAttempt.objects.visible_to(request.user).filter(valid=False)[:200]
+    return render(request, 'core/code_attempts.html', {'title': 'Códigos de tarjeta', 'attempts': failed})
 
 
 def demo_public(request, public_id):
-    """The demo itself, reachable without signing in: the UUID is the key.
-
-    A missing business and a business without a demo are the same 404.
-    """
-    b = Business.objects.filter(public_id=public_id).first()
+    """Old address (/clientes/<uuid>/demo-cliente/): links already sent keep working."""
+    b = Business.objects.filter(public_id=public_id).exclude(stage='discarded').first()
     if b is None or not has_demo(b):
         raise Http404
-    response = HttpResponse(read_demo(b), content_type='text/html; charset=utf-8')
-    for header, value in DEMO_HEADERS.items():
-        response[header] = value
+    from django.http import HttpResponsePermanentRedirect
+    return HttpResponsePermanentRedirect(demo_url(b))
+
+
+@roles('admin', 'developer')
+def demo_qr(request, public_id):
+    """QR of the public demo address, as a PNG to download and print or send."""
+    b = scoped(Business, request.user, public_id)
+    if not has_demo(b):
+        raise Http404
+    response = HttpResponse(qr_png(demo_url(b)), content_type='image/png')
+    if request.GET.get('descargar'):
+        response['Content-Disposition'] = f'attachment; filename="qr-{b.demo_slug}.png"'
+    response['Cache-Control'] = 'private, no-store'
     return response
 
 
@@ -347,7 +518,11 @@ def demo_upload(request, public_id):
     if not form.is_valid():
         return render(request, 'core/form.html', {'form': form, 'title': 'Subir demo'}, status=400)
     replacing = has_demo(b)
-    save_demo(b, form.cleaned_data['file'])
+    try:
+        save_demo(b, form.cleaned_data['file'], request.FILES['file'].name, request.user)
+    except DemoError as exc:
+        form.add_error('file', str(exc))
+        return render(request, 'core/form.html', {'form': form, 'title': 'Subir demo'}, status=400)
     activity(b, 'demo_uploaded', 'Demo reemplazada.' if replacing else 'Demo subida.', request.user, client_visible=False)
     messages.success(request, 'Demo reemplazada.' if replacing else 'Demo subida.')
     return redirect(b)

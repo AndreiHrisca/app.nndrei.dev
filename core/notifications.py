@@ -9,11 +9,17 @@ def deliver(message):
     mail.attach_alternative(render_to_string('emails/message.html',{'title':message.subject,'text':message.text,'url':message.url}),'text/html')
     mail.send()
 
-def notify(subject,recipients,text,url=''):
+def notify(subject,recipients,text,url='',sensitive_until=None):
     from .models import EmailOutbox
     recipients=list(dict.fromkeys(x for x in recipients if x))
     if not recipients: return
-    message=EmailOutbox.objects.create(subject=subject,recipients=recipients,text=text,url=url)
+    message=EmailOutbox.objects.create(subject=subject,recipients=recipients,text=text,url=url,sensitive_until=sensitive_until)
+    if sensitive_until:
+        # Sent by the worker: the request answers just as fast whether or not
+        # an email went out, so timing does not reveal which addresses exist.
+        from django_q.tasks import async_task
+        transaction.on_commit(lambda: async_task('core.notifications.send_outbox',message.pk))
+        return
     # Persist before sending. SMTP errors do not lose the business operation.
     transaction.on_commit(lambda: send_outbox(message.pk))
 
@@ -22,6 +28,11 @@ def send_outbox(pk):
     with transaction.atomic():
         message=EmailOutbox.objects.select_for_update().get(pk=pk)
         if message.sent_at: return
+        if message.sensitive_until and message.sensitive_until<=timezone.now():
+            # An expired login link is useless: drop it instead of sending it late.
+            message.url=''; message.last_error='Enlace caducado antes de poder enviarse.'
+            message.attempts=10; message.save()
+            return
         message.attempts+=1
         try:
             deliver(message)
@@ -29,6 +40,7 @@ def send_outbox(pk):
             message.last_error='No se pudo entregar el email. Se reintentará automáticamente.'
         else:
             message.sent_at=timezone.now(); message.last_error=''
+            if message.sensitive_until: message.url=''
         message.save()
 
 def retry_emails():

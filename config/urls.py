@@ -27,6 +27,7 @@ urlpatterns += [
     path('clientes/<uuid:public_id>/portal/', views.portal_preview, name='portal_preview'),
     path('clientes/<uuid:public_id>/peticiones/', views.request_create, name='request_create'),
     path('clientes/<uuid:public_id>/estudio/', views.study, name='study'),
+    path('clientes/<uuid:public_id>/estudio/validar/', views.study_validate, name='study_validate'),
     path('peticiones/<uuid:public_id>/estado/', views.request_status, name='request_status'),
     path('documentos/<uuid:public_id>/', views.document_download, name='document_download'),
     path('portal/negocio/<uuid:public_id>/', views.portal, name='portal_business'),
@@ -48,11 +49,18 @@ urlpatterns += [
     path('buscar/',pipeline_views.search,name='search'),
     path('buscar/actualizar/',pipeline_views.refresh,name='search_refresh'),
     path('buscar/progreso/<uuid:public_id>/',pipeline_views.search_progress,name='search_progress'),
+    path('buscar/ciudades/',pipeline_views.city_options,name='city_options'),
+    path('buscar/barrios/',pipeline_views.neighbourhood_options,name='neighbourhood_options'),
+    path('buscar/zona/',pipeline_views.area_panel,name='area_panel'),
+    path('buscar/zona/buscar/',pipeline_views.area_search,name='area_search'),
+    path('buscar/zona/activar/',pipeline_views.area_activate,name='area_activate'),
+    path('buscar/zonas/<int:pk>/alternar/',pipeline_views.area_toggle,name='area_toggle'),
     path('buscar/<uuid:public_id>/captar/',pipeline_views.place_capture,name='place_capture'),
     path('buscar/<uuid:public_id>/descartar/',pipeline_views.place_discard,name='place_discard'),
     path('clientes/<uuid:public_id>/fase/',pipeline_views.stage,name='stage'),
     path('clientes/<uuid:public_id>/seguimiento/',pipeline_views.followup,name='followup'),
-    path('clientes/<uuid:public_id>/visita/',pipeline_views.followup,{'visit':True},name='visit'),
+    path('clientes/<uuid:public_id>/visita/',pipeline_views.visit,name='visit'),
+    path('clientes/<uuid:public_id>/reactivar/',pipeline_views.reactivate,name='business_reactivate'),
     path('seguimiento/<uuid:public_id>/hecho/',pipeline_views.followup_done,name='followup_done'),
 ]
 from core import finance_views
@@ -70,6 +78,32 @@ urlpatterns += [path('documentos/<uuid:public_id>/estado/',views.document_edit,n
 urlpatterns += [path('peticiones/<uuid:public_id>/planificar/',views.request_plan,name='request_plan')]
 urlpatterns += [path('mas/',views.more,name='more'),path('clientes/<uuid:public_id>/nota/',views.business_note,name='business_note')]
 
+from core import hours_views
+urlpatterns += [
+    path('clientes/<uuid:public_id>/horario/', hours_views.business_hours, name='business_hours'),
+    path('clientes/<uuid:public_id>/horario/google/', hours_views.business_hours_reset, name='business_hours_reset'),
+    path('clientes/<uuid:public_id>/actualizar-google/', hours_views.business_google_refresh, name='business_google_refresh'),
+]
+
+from core import security_views
+urlpatterns += [
+    path('seguridad/', security_views.security, name='security'),
+    path('seguridad/desactivar/', security_views.security_turn_off, name='security_turn_off'),
+    path('seguridad/dispositivos/<uuid:public_id>/olvidar/', security_views.device_revoke, name='device_revoke'),
+    path('seguridad/dispositivos/olvidar-todos/', security_views.device_revoke_all, name='device_revoke_all'),
+    path('entrar/enlace/', security_views.login_link, name='login_link'),
+    path('entrar/<str:token>/', security_views.login_link_use, name='login_link_use'),
+]
+
+from core import estimation_views
+urlpatterns += [path('clientes/<uuid:public_id>/estimacion/', estimation_views.business_estimation, name='business_estimation')]
+
+from core import mcp_views
+urlpatterns += [
+    path('conectar-claude/', mcp_views.consent, name='mcp_consent'),
+    path('seguridad/claude/<str:grant_id>/desconectar/', mcp_views.disconnect, name='mcp_disconnect'),
+]
+
 from core import pwa_views
 urlpatterns += [
     path('sw.js', pwa_views.service_worker, name='service_worker'),
@@ -82,4 +116,31 @@ urlpatterns += [
     path('clientes/<uuid:public_id>/demo-cliente/', views.demo_public),
     path('clientes/<uuid:public_id>/demo/', views.demo_upload, name='demo_upload'),
     path('clientes/<uuid:public_id>/demo/eliminar/', views.demo_delete, name='demo_delete'),
+    path('clientes/<uuid:public_id>/demo/qr.png', views.demo_qr, name='demo_qr'),
+    # Public: the newest demo version, no session needed.
+    path('demos/<slug:slug>/', views.demo_by_slug, name='demo_slug'),
+    path('demos/<slug:slug>', views.demo_by_slug),
 ]
+# Card codes: nndrei.dev/qr sends the code typed by the visitor here.
+urlpatterns += [
+    path('c/<str:code>', views.redeem_code, name='redeem_code'),
+    path('c/<str:code>/', views.redeem_code),
+    path('clientes/<uuid:public_id>/demo/codigo/', views.demo_code_regenerate, name='demo_code_regenerate'),
+    path('codigos/', views.code_attempts, name='code_attempts'),
+    path('robots.txt', views.robots_txt, name='robots_txt'),
+]
+
+# Consultas from nndrei.dev/hablamos (admin only; synced by the inbox-sync service).
+from core import inquiry_views
+urlpatterns += [
+    path('consultas/', inquiry_views.inquiries, name='inquiries'),
+    path('consultas/<uuid:public_id>/', inquiry_views.inquiry_detail, name='inquiry_detail'),
+    path('consultas/<uuid:public_id>/estado/', inquiry_views.inquiry_status, name='inquiry_status'),
+    path('consultas/<uuid:public_id>/notas/', inquiry_views.inquiry_notes, name='inquiry_notes'),
+    path('consultas/<uuid:public_id>/responder/<str:channel>/', inquiry_views.inquiry_reply, name='inquiry_reply'),
+    path('consultas/<uuid:public_id>/convertir/', inquiry_views.inquiry_convert, name='inquiry_convert'),
+    path('consultas/<uuid:public_id>/eliminar/', inquiry_views.inquiry_delete, name='inquiry_delete'),
+]
+
+from core.map_views import pipeline_map_data
+urlpatterns += [path('seguimiento/mapa/datos/', pipeline_map_data, name='pipeline_map_data')]

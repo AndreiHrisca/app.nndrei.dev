@@ -17,6 +17,8 @@ def proposal(accounts,businesses):
 def test_revision_acceptance(accounts,proposal,django_capture_on_commit_callbacks):
     proposal_action(accounts['admin'],proposal.public_id,'send')
     proposal_action(accounts['client'],proposal.public_id,'changes','Cambiar carta')
+    # Asking for changes keeps the business in «Propuesta», the repeatable step.
+    proposal.business.refresh_from_db(); assert proposal.business.stage=='proposal'
     old=proposal.versions.first(); old.notes='Changed'
     with pytest.raises(ValueError): old.save()
     v=revise_proposal(accounts['admin'],proposal.public_id)
@@ -25,7 +27,8 @@ def test_revision_acceptance(accounts,proposal,django_capture_on_commit_callback
     proposal_action(accounts['client'],proposal.public_id,'accept',ip='127.0.0.1')
     proposal.refresh_from_db(); proposal.business.refresh_from_db()
     assert proposal.status=='accepted' and proposal.business.stage=='approved'
-    assert StageChange.objects.filter(business=proposal.business).count()==4
+    # visited → proposal → approved: the changes round trip no longer moves the stage.
+    assert list(StageChange.objects.filter(business=proposal.business).order_by('pk').values_list('to_stage',flat=True))==['proposal','approved']
     with pytest.raises(ValidationError): proposal_action(accounts['client'],proposal.public_id,'accept')
 
 @pytest.mark.parametrize('role',['admin','developer','accountant','client'])

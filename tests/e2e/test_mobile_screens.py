@@ -22,7 +22,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice  # noqa: E402
 from core.models import (  # noqa: E402
     ActivityEvent, Assignment, Business, ClientCharge, ClientMembership, Commission, Document, FollowUp,
     PlaceSnapshot, PlacesUsage, Proposal, ProposalLine, ProposalVersion, RecurringExpense, Request,
-    SearchCategory, SearchZone, Study, Transaction, User, Website,
+    City, Neighbourhood, SearchArea, SearchCategory, Study, Transaction, User, Website,
 )
 
 # Playwright's sync API runs its own event loop in this thread; the ORM calls
@@ -42,7 +42,16 @@ def demo(db):
     today = timezone.localdate()
     users = {role: User.objects.create_user(f'{role}@example.com', 'Valid-test-password-829!', name=name, role=role)
              for role, name in [('admin', 'Andrei'), ('developer', 'Lucía Developer'), ('accountant', 'Marta Contable'), ('client', 'Santiago')]}
-    zones = [SearchZone.objects.create(name=n, latitude=40.35, longitude=-3.69) for n in ['Villaverde Bajo', 'Miguel Hernández', 'San Cristóbal de los Ángeles']]
+    madrid = City.objects.get_or_create(ine_code='28079', defaults={'name': 'Madrid', 'search_name': 'madrid', 'province': 'Madrid', 'community': 'Comunidad de Madrid'})[0]
+    madrid.neighbourhoods_fetched_at = timezone.now()
+    madrid.save()
+
+    def barrio(name, lat, code):
+        ring = [[-3.70, lat], [-3.68, lat], [-3.68, lat + 0.01], [-3.70, lat + 0.01], [-3.70, lat]]
+        return Neighbourhood.objects.create(city=madrid, name=name, search_name=name.lower(), district='Villaverde', source='madrid', external_id=code,
+                                            bbox=[lat, -3.70, lat + 0.01, -3.68], geometry={'type': 'Polygon', 'coordinates': [ring]}, latitude=lat + 0.005, longitude=-3.69)
+    zones = [barrio('Los Ángeles', 40.35, '176'), barrio('San Cristóbal', 40.34, '172'), barrio('Butarque', 40.33, '173')]
+    SearchArea.objects.create(city=madrid, neighbourhood=zones[1], active=True)
     cats = {n: SearchCategory.objects.create(name=n, color=c) for n, c in [
         ('Bares', 'yellow'), ('Peluquerías', 'pink'), ('Talleres', 'blue'), ('Clínicas dentales', 'green'), ('Cafeterías', 'purple'), ('Gimnasios', 'teal')]}
     rows = [
@@ -52,7 +61,7 @@ def demo(db):
         ('Clínica Dental Sonrisas', 'Clínicas dentales', 'found', '', 'Calle Arroyo Bueno 3'),
         ('Café Central', 'Cafeterías', 'profile_created', '633 444 555', ''),
         ('Gimnasio Fuerza Sur', 'Gimnasios', 'development', '644 555 666', 'Paseo de Alberto Palacios 20'),
-        ('Bar La Parada', 'Bares', 'review', '655 666 777', 'Calle Villaverde 9'),
+        ('Bar La Parada', 'Bares', 'proposal', '655 666 777', 'Calle Villaverde 9'),
         ('Barbería Vintage 1985', 'Peluquerías', 'approved', '666 777 888', ''),
         ('Cafetería Los Porches', 'Cafeterías', 'testing', '677 888 999', 'Plaza Mayor de Villaverde 1'),
         ('Taller Rápido Express', 'Talleres', 'discarded', '', ''),
@@ -60,7 +69,7 @@ def demo(db):
     bs = []
     for i, (name, cat, stage, phone, address) in enumerate(rows):
         b = Business.objects.create(name=name, category=cats[cat], stage=stage, phone=phone, address=address,
-                                    zone=zones[i % 3].name, contact='Santiago' if i == 0 else '', email='hola@example.com' if i < 3 else '',
+                                    city=madrid, neighbourhood=zones[i % 3], contact='Santiago' if i == 0 else '', email='hola@example.com' if i < 3 else '',
                                     next_action='Llamar para concretar visita' if i % 3 == 1 else '',
                                     next_action_date=today + timedelta(days=i) if i % 2 else None,
                                     stage_changed_at=timezone.now() - timedelta(days=i))
@@ -89,8 +98,8 @@ def demo(db):
         status = 'pipeline' if i in (2, 5) else 'discarded' if i in (7, 11) else 'new'
         PlaceSnapshot.objects.create(
             place_id=f'place-{i}', name=['Bar Casa Paco', 'Peluquería Marisol de Villaverde Alto', 'Taller El Pistón', 'Cafetería Nuevo Estilo'][i % 4] + (f' {i}' if i > 3 else ''),
-            zone=zones[i % 3], category=list(cats.values())[i % 6], rating=3.8 + (i % 10) / 10, reviews=40 + i * 37, photos=i % 9, has_website=i % 3 == 0,
-            website_url='https://example.com' if i % 3 == 0 else '', opportunity_score=100 - i * 3, status=status, business=bs[i % 3] if status == 'pipeline' else None, distance_m=300 + i * 50)
+            city=madrid, neighbourhood=zones[i % 3], category=list(cats.values())[i % 6], rating=3.8 + (i % 10) / 10, reviews=40 + i * 37, photos=i % 9, has_website=i % 3 == 0,
+            website_url='https://example.com' if i % 3 == 0 else '', opportunity_score=100 - i * 3, status=status, business=bs[i % 3] if status == 'pipeline' else None)
     PlacesUsage.objects.create(month=today.replace(day=1), requests=51)
     for months_back, amount in [(0, 500), (1, 1200), (2, 0), (3, 430), (5, 250)]:
         day = (today.replace(day=1) - timedelta(days=28 * months_back)).replace(day=5)
@@ -128,10 +137,10 @@ def screens(demo):
     return {
         'admin': [('pipeline', '/'), ('buscar', '/buscar/'), ('clientes', '/clientes/'), ('ficha', f'/clientes/{b.public_id}/'),
                   ('propuestas', '/propuestas/'), ('propuesta', f'/propuestas/{p.public_id}/'), ('finanzas', '/finanzas/'),
-                  ('usuarios', '/usuarios/'), ('mas', '/mas/'), ('nuevo-lead', '/clientes/nuevo/')],
+                  ('usuarios', '/usuarios/'), ('mas', '/mas/'), ('nuevo-lead', '/clientes/nuevo/'), ('seguridad', '/seguridad/')],
         'developer': [('clientes', '/clientes/'), ('ficha', f'/clientes/{demo["businesses"][0].public_id}/')],
         'accountant': [('finanzas', '/finanzas/'), ('ficha', f'/clientes/{b.public_id}/')],
-        'client': [('portal', '/portal/'), ('peticiones', '/portal/peticiones/'), ('gastos', '/portal/gastos/'), ('documentos', '/portal/documentos/')],
+        'client': [('portal', '/portal/'), ('peticiones', '/portal/peticiones/'), ('gastos', '/portal/gastos/'), ('documentos', '/portal/documentos/'), ('seguridad', '/seguridad/')],
     }
 
 
@@ -203,9 +212,9 @@ def test_desktop_screens(browser, client, live_server, demo):
 
 def test_phone_interactions(browser, client, live_server, demo):
     """The HTMX flows behind the phone controls, driven like a thumb would."""
-    zone, category = SearchZone.objects.first(), SearchCategory.objects.first()
+    madrid, category = City.objects.get_or_create(ine_code='28079', defaults={'name': 'Madrid', 'search_name': 'madrid', 'province': 'Madrid', 'community': 'Comunidad de Madrid'})[0], SearchCategory.objects.first()
     for i in range(40):  # Enough rows for a second page of opportunities.
-        PlaceSnapshot.objects.create(place_id=f'extra-{i}', name=f'Negocio extra {i}', zone=zone, category=category, opportunity_score=5, reviews=10)
+        PlaceSnapshot.objects.create(place_id=f'extra-{i}', name=f'Negocio extra {i}', city=madrid, category=category, opportunity_score=5, reviews=10)
     context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
     cards = '.mob-only .list-card'
 
@@ -214,7 +223,8 @@ def test_phone_interactions(browser, client, live_server, demo):
     assert page.locator(f'#pipeline-list {cards}').count() == 9
     page.locator('.stage-tile.proposal').click()
     page.wait_for_selector('.stage-tile.proposal.is-active')
-    assert page.locator(f'#pipeline-list {cards}').count() == 1 and 'stage=proposal' in page.url
+    # Two businesses: one was «Propuesta enviada» and the other «Cambios en la propuesta», now both «Propuesta».
+    assert page.locator(f'#pipeline-list {cards}').count() == 2 and 'stage=proposal' in page.url
     page.locator('.stage-tile.proposal').click()
     page.wait_for_selector('.stage-tile.proposal:not(.is-active)')
     assert page.locator(f'#pipeline-list {cards}').count() == 9
@@ -234,7 +244,7 @@ def test_phone_interactions(browser, client, live_server, demo):
     first = page.locator('#op-list .list-card', has=page.get_by_role('button', name='Captar')).first
     name, card_id = first.locator('.lc-title').inner_text(), first.get_attribute('id')
     first.get_by_role('button', name='Captar').click()
-    page.wait_for_selector(f'#{card_id} >> text=En pipeline')
+    page.wait_for_selector(f'#{card_id} >> text=En seguimiento')
     assert Business.objects.filter(name=name).exists()
 
     # Clientes: typing filters the list in place.
@@ -256,4 +266,130 @@ def test_phone_interactions(browser, client, live_server, demo):
     page.get_by_role('button', name='Guardar nota').click()
     page.wait_for_selector('text=Nota guardada en el historial.')
     assert ActivityEvent.objects.filter(business=demo['businesses'][1], text='Nota: Volver el jueves por la tarde').exists()
+    context.close()
+
+
+def test_hours_and_near_me(browser, client, live_server, demo):
+    """Phase 1 on a phone: type the hours with the thumb, then sort the list by distance."""
+    b = demo['businesses'][1]
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    page.get_by_role('button', name='Editar horario').click()
+    page.wait_for_selector('[data-hours-editor]')
+    monday = page.locator('[data-hours-day="1"]')
+    monday.locator('input[name="d1_s0_open"]').fill('10:00')
+    monday.locator('input[name="d1_s0_close"]').fill('14:00')
+    monday.get_by_role('button', name='+ Añadir tramo').click()
+    monday.locator('input[name="d1_s1_open"]').fill('20:00')
+    monday.locator('input[name="d1_s1_close"]').fill('02:00')
+    page.get_by_role('button', name='Copiar el lunes a martes–viernes').click()
+    assert page.locator('input[name="d5_s1_close"]').input_value() == '02:00'
+    page.locator('[data-hours-day="0"] [data-closed-toggle]').check()
+    page.locator('[data-hours-day="6"] [data-closed-toggle]').check()
+    assert overflow(page)['scroll'] <= PHONE['width']
+    page.locator('#hours-card').screenshot(path=str(OUT / '393-admin-horario-editor.png'))
+    page.get_by_role('button', name='Guardar horario').click()
+    page.wait_for_selector('#hours-card >> text=Puesto a mano')
+    b.refresh_from_db()
+    assert b.hours_source == 'manual' and len(b.opening_hours) == 10
+    page.locator('#hours-card').screenshot(path=str(OUT / '393-admin-horario.png'))
+    context.close()
+
+    # "Cerca de mí" with permission: nearest first, a distance on the card, no position in the URL.
+    near, far = demo['businesses'][0], demo['businesses'][2]
+    Business.objects.filter(pk=near.pk).update(latitude=40.4005, longitude=-3.7)
+    Business.objects.filter(pk=far.pk).update(latitude=40.45, longitude=-3.7)
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    context.grant_permissions(['geolocation'])
+    context.set_geolocation({'latitude': 40.4, 'longitude': -3.7})
+    visit(page, live_server.url + '/clientes/')
+    page.locator('#m-quick-filters [data-near]').click()
+    page.wait_for_selector('#clients-table .mob-only .lc-distance')
+    titles = page.locator('#clients-table .mob-only .lc-title').all_inner_texts()
+    assert titles[:2] == [near.name, far.name]
+    assert 'sort=cerca' in page.url and 'lat=' not in page.url
+    page.screenshot(path=str(OUT / '393-admin-clientes-cerca.png'))
+    context.close()
+
+    # Without permission the list stays usable and says why there are no distances.
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + '/clientes/')
+    count = page.locator('#clients-table .mob-only .list-card').count()
+    page.locator('#m-quick-filters [data-near]').click()
+    page.wait_for_selector('[data-near-note]:not([hidden])')
+    assert page.locator('#clients-table .mob-only .list-card').count() == count
+    assert page.locator('#clients-table .lc-distance').count() == 0
+    context.close()
+
+
+def test_he_ido_sheet(browser, client, live_server, demo):
+    """Phase 2 on a phone: the go block, then "He ido" in a sheet that saves without leaving the card."""
+    b = demo['businesses'][0]
+    Business.objects.filter(pk=b.pk).update(stage='found')
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    assert page.locator('.go-card a', has_text='Waze').get_attribute('href').startswith('https://waze.com/ul?')
+    page.screenshot(path=str(OUT / '393-admin-ficha-ir.png'))
+    page.locator('.m-quick [data-sheet-open="m-visit-sheet"]').click()
+    sheet = page.locator('#m-visit-sheet')
+    sheet.locator('input[name="result"]').fill('Interesado')
+    sheet.locator('input[name="talked_to"]').fill('Santiago')
+    sheet.locator('input[name="next_step"]').fill('Enseñar la web de muestra')
+    sheet.locator('input[name="followup_date"]').fill((timezone.localdate() + timedelta(days=2)).isoformat())
+    assert overflow(page)['scroll'] <= PHONE['width']
+    sheet.screenshot(path=str(OUT / '393-admin-he-ido.png'))
+    sheet.get_by_role('button', name='Guardar visita').click()
+    page.wait_for_selector('text=Visita guardada. Fase: Visitado.')
+    b.refresh_from_db()
+    assert b.stage == 'visited' and FollowUp.objects.filter(business=b, description='Enseñar la web de muestra').exists()
+    context.close()
+
+
+def test_estimation_card(browser, client, live_server, demo):
+    """Phase 5 on a phone: fill what you saw, get the monthly range and the pitch."""
+    b = demo['businesses'][1]
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + f'/clientes/{b.public_id}/')
+    page.locator('#estimation-card').get_by_role('button', name='Estimar').click()
+    page.wait_for_selector('#estimation-card form')
+    card = page.locator('#estimation-card')
+    card.locator('input[name="reviews"]').fill('480')
+    card.locator('input[name="years"]').fill('4')
+    card.locator('input[name="ticket"]').fill('18')
+    card.locator('input[name="tables"]').fill('12')
+    card.locator('input[name="people_per_table"]').fill('4')
+    card.get_by_label('Comida').check()
+    card.get_by_label('Cena').check()
+    card.locator('input[name="rotations"]').fill('1')
+    card.locator('input[name="days_per_week"]').fill('6')
+    card.locator('select[name="concurrency"]').select_option('medium')
+    card.get_by_label('Usa apps de reparto').check()
+    assert overflow(page)['scroll'] <= PHONE['width']
+    card.screenshot(path=str(OUT / '393-admin-estimacion-form.png'))
+    card.get_by_role('button', name='Calcular y guardar').click()
+    page.wait_for_selector('#estimation-card .est-mid')
+    card.locator('.est-how summary').click()
+    page.locator('#estimation-card').screenshot(path=str(OUT / '393-admin-estimacion.png'))
+    context.close()
+
+
+def test_city_and_neighbourhood_filter(browser, client, live_server, demo):
+    """Buscar clientes on a phone: type a city, pick it, pick a neighbourhood, see its area panel."""
+    City.objects.create(ine_code='28092', name='Móstoles', search_name='mostoles', province='Madrid', community='Comunidad de Madrid')
+    context, page = open_page(browser, client, live_server, demo['users']['admin'], PHONE)
+    visit(page, live_server.url + '/buscar/')
+    page.locator('[data-sheet-open="m-search-sheet"]').click()
+    sheet = page.locator('#m-search-sheet')
+    sheet.locator('[data-city-input]').fill('madr')
+    sheet.locator('[data-city-option]', has_text='Madrid').first.click()
+    page.wait_for_selector('#m-barrio option:has-text("San Cristóbal")', state='attached')
+    assert sheet.locator('#m-barrio option').first.inner_text() == 'Toda la ciudad'
+    sheet.locator('#m-barrio').select_option(label='San Cristóbal (Villaverde)')
+    assert overflow(page)['scroll'] <= PHONE['width']
+    sheet.screenshot(path=str(OUT / '393-admin-buscar-filtros.png'))
+    sheet.get_by_role('button', name='Aplicar').click()
+    page.wait_for_selector('#area-panel .chip')
+    assert 'Zona activa' in page.locator('#area-panel').inner_text()
+    page.screenshot(path=str(OUT / '393-admin-buscar-zona.png'), full_page=True)
     context.close()

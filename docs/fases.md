@@ -75,3 +75,157 @@ Decisión: el swipe para captar/descartar se omite; con la confirmación obligat
 **Pruebas de navegador**: `docker compose -p nndrei-validation -f compose.test.yaml run --rm e2e` (imagen `Dockerfile.e2e`, WebKit). Recorre 18 pantallas de los cuatro roles a 375, 393 y 430 px y falla si `scrollWidth > innerWidth`; prueba además los flujos HTMX (filtro por fase, bottom sheet, Captar, «Cargar más», búsqueda, cambio de mes, nota rápida). Capturas en `docs/screenshots/mobile/`: `393-<rol>-<pantalla>.png` (lo que se ve al abrir) y `-full.png` (página entera sin barras fijas); las de 1440 px, en `desktop/`. La suite normal la omite si no hay Playwright.
 
 Resultado: **614 pruebas superadas** + 3 de navegador; `makemigrations --check` sin cambios.
+
+## 9. Textos comprensibles
+
+Todos los textos visibles que se renombran viven en `core/labels.py`: fases (`STAGE_LABELS`), roles, estados de petición, títulos, botones y mensajes. Los modelos construyen sus `choices` desde ahí y las plantillas leen las constantes con `{% label 'NOMBRE' %}` (cualquier constante en mayúsculas de texto). No cambian modelos, campos, URLs ni valores guardados: la migración `0016_visible_labels` solo altera los `choices` y no ejecuta SQL.
+
+Cambios: «Pipeline» → «Seguimiento»; «+ Nuevo lead» → «+ Nuevo negocio»; «N en el embudo» → «N en marcha»; fases Estudiado, Propuesta enviada, Cambios en la propuesta, Aprobado (también en la chip, antes «Presupuesto aprobado»), En construcción, Revisión final y Web publicada; «En pipeline» → «En seguimiento»; «2FA» → «Verificación en dos pasos»; roles Administrador y Desarrollador; «Hosting» → «Alojamiento web»; «Demo» → «Web de muestra»; estados de petición En construcción, Revisión final y Publicada. El historial de actividad ya escrito conserva su texto antiguo porque es inmutable.
+
+Resultado: **661 pruebas superadas**; `makemigrations --check` sin cambios.
+
+## 10. Horarios, «abierto ahora» y «Cerca de mí»
+
+**Datos.** `Business` gana `latitude`, `longitude`, `opening_hours` (JSON), `hours_source` (`google`/`manual`), `hours_updated_at`, y la copia de Google (`google_hours`, `google_rating`, `google_reviews`, `google_price_level`, `google_maps_url`, `google_fetched_at`). El horario usa el mismo formato que `regularOpeningHours.periods` de Places API (New): día 0 = domingo, un cierre en el día siguiente cruza la medianoche y un único periodo sin cierre es 24 horas. Un horario manual nunca se sobrescribe; «Volver al horario de Google» usa `google_hours` sin llamar a la API.
+
+**Sin llamadas nuevas a Google.** No hay refresco diario: la cuota es de 800 llamadas al mes. La búsqueda de «Buscar clientes» pide además `regularOpeningHours`, `utcOffsetMinutes` y `priceLevel` (la máscara ya estaba en el nivel de precio de esos campos), y cada resultado cuyo `place_id` coincide con un negocio actualiza su horario, ubicación y nota con la misma llamada. `SearchSlice` guarda cuándo se consultó cada zona × sector: «Actualizar» se salta las combinaciones consultadas hace menos de `PLACES_REFRESH_MIN_DAYS` días (7 por defecto) y la pantalla dice antes de pulsar cuántas llamadas puede gastar. Para un negocio que no sale en ninguna búsqueda, la ficha ofrece «Actualizar desde Google» (Place Details, 1 llamada, con confirmación). Las vistas nunca llaman a la API al mostrarse.
+
+Caducidad: igual que los resultados de búsqueda, la copia de Google en un negocio se borra a los 30 días en `daily_maintenance` (`expire_google_data`). El horario puesto a mano es dato propio y se conserva.
+
+**Estado.** `core/hours.py` es puro (`hours_status(periods, now)`), en hora de Madrid: «Abierto, cierra a las 23:30», «Cierra en 40 min» (menos de 60), «Cerrado, abre a las 17:00», «Cerrado hoy, abre mañana a las 07:30», «Cerrado hoy, abre el martes a las 07:30», «Abierto 24 horas» y «Horario desconocido». Tramos contiguos se funden, incluido el paso de sábado a domingo.
+
+**Clientes.** Cada negocio muestra su estado (el desconocido, en gris discreto). «Abiertos ahora» filtra; «Cerca de mí» pide la ubicación al navegador, la manda solo con esa petición y el servidor la quita de la URL que se guarda en el historial (`HX-Push-Url`). Ordena por distancia (haversine de `places.distance_m`) con los negocios sin coordenadas al final, y muestra «650 m» o «1,2 km». Sin permiso, la lista sigue igual y lo explica. Se calcula en Python porque la lista no está paginada.
+
+**Ficha.** Tarjeta «Horario» con la semana (hoy resaltado), origen y fecha. El editor (solo admin) tiene siete días con «Cerrado», hasta tres tramos por día, «+ Añadir tramo» y «Copiar el lunes a martes–viernes»; valida tramos incompletos y solapados. Cada cambio queda en el historial interno.
+
+Rutas nuevas (en la matriz de permisos, solo admin): `/clientes/<uuid>/horario/`, `/clientes/<uuid>/horario/google/` y `/clientes/<uuid>/actualizar-google/`.
+
+Resultado: **714 pruebas superadas** + 4 de navegador (nueva: editor de horario y «Cerca de mí» con y sin permiso; capturas `393-admin-horario*.png` y `393-admin-clientes-cerca.png`); `makemigrations --check` sin cambios.
+
+## 11. Ir al negocio, «He ido» y descartados
+
+**Ir al negocio.** Tarjeta con botones grandes a Google Maps (`/maps/dir/?api=1&destination=lat,lng&destination_place_id=…`), Waze (`ul?ll=…&navigate=yes`) y Apple Maps (`?daddr=…`). Sin coordenadas se usa la dirección codificada (o nombre y zona). En el móvil, la fila de acciones rápidas empieza por «He ido», luego Llamar, Nota rápida y Avanzar fase. Los enlaces se construyen en `core/visits.directions`.
+
+**He ido.** Hoja inferior con HTMX (`/clientes/<uuid>/visita/`; sin JavaScript es una página normal): resultado (con sugerencias), con quién hablé, cuándo (ahora, editable), notas, próximo paso, fecha de seguimiento y tipo. `core/visits.record_visit` lo guarda en una transacción: la visita (con quien la registra como visitante), una entrada en el historial interno, y
+
+- si el negocio estaba en «Encontrado» o «Estudiado», pasa a «Visitado» con su `StageChange`; nunca retrocede, y un descartado sigue descartado;
+- el próximo paso pasa a «Próxima acción» del negocio y, si tiene fecha, crea un `FollowUp` que aparece en «Próximas acciones» y en la columna «Siguiente paso».
+
+No se ha creado un «estado comercial»: se usan las fases existentes. `Visit` gana `talked_to`, `next_step`, `followup_date` y `followup`.
+
+**Próximas acciones.** Ordenadas por fecha; las vencidas llevan fondo rojo y «Vencida ·», las de hoy «Hoy». Los descartados no aparecen. La columna «Siguiente paso» muestra la acción pendiente más cercana o la «Próxima acción» del negocio, también marcada si está vencida.
+
+**Descartados.** «Descartado» ya existía como salida con motivo obligatorio. Ahora la lista de Clientes los oculta salvo que se filtre por esa fase, y la ficha muestra el motivo y «Reactivar» (`/clientes/<uuid>/reactivar/`), que devuelve el negocio a la fase desde la que se descartó.
+
+Resultado: **738 pruebas superadas** + 5 de navegador (nueva: «He ido» en el móvil; capturas `393-admin-ficha-ir.png` y `393-admin-he-ido.png`).
+
+## 12. Verificación en dos pasos por rol y enlace para clientes
+
+**Política por rol** (`TwoFactorPolicy`, editable en `/admin/`; la migración `0019` crea los valores por defecto): administrador obligatoria (la app guarda enlaces a credenciales de clientes), desarrollador y contador opcional, cliente desactivada. Regla (`core/security.second_step_required`): se pide el código si el rol la exige **o** si la persona la tiene activada. Con «Opcional», cada cual la activa o desactiva en `/seguridad/` (desactivar pide un código actual). Con «Desactivada» no se ofrece a nadie nuevo, pero quien ya la tenía la sigue usando hasta que la quite: bajar la política nunca deja a nadie sin el segundo paso sin que lo decida.
+
+Cambio de comportamiento al desplegar: desarrolladores y contadores sin TOTP configurado dejan de ver la pantalla de alta; los que ya lo tienen siguen igual.
+
+**Recordar este dispositivo** (`TRUSTED_DEVICE_DAYS`, 30 por defecto): casilla en la pantalla del código. Cookie firmada, `HttpOnly`, `SameSite=Lax`, con el usuario y un token aleatorio; en base de datos solo el SHA-256 (`TrustedDevice`). Cuenta como segundo paso solo para su dueño, sin caducar y sin revocar. `/seguridad/` lista los dispositivos (sistema y navegador, alta, último uso, caducidad) y permite olvidar uno o todos; desactivar la verificación los olvida todos.
+
+**Enlace para clientes** (`/entrar/enlace/`): la respuesta es siempre la misma («Si ese email corresponde a un cliente…»), exista el email o no, sea o no cliente, y aunque se supere el límite. Límites contados en base de datos (el caché no se comparte entre procesos): 3 peticiones por email cada 15 minutos y 10 por IP de conexión cada hora (`LoginLinkRequest`). El enlace caduca a los 15 minutos, sirve una vez y usarlo gasta los demás pendientes de esa persona; en base de datos solo su hash (`LoginToken`). Abrirlo (`GET`) solo muestra un botón «Entrar»: los escáneres de correo que abren enlaces no lo gastan. El email sale por la cola del `worker`, para que la respuesta tarde lo mismo exista o no el email, y la bandeja borra la URL al enviarlo; si caduca antes de salir, no se envía. La contraseña sigue funcionando, y si el cliente activó el segundo paso, se le pide después del enlace.
+
+Resultado: **804 pruebas superadas** (incluye la matriz de login rol × política × dispositivo) + 5 de navegador; captura `393-*-seguridad.png`.
+
+## 13. Estimación de facturación (uso interno)
+
+Tarjeta «Estimación de facturación» en la ficha, **solo para administración**: `Estimation.objects.visible_to` devuelve vacío para cualquier otro rol, la tarjeta no se incluye para ellos y la entrada del historial («Nueva estimación de facturación.») no lleva cifras, porque los desarrolladores leen el historial interno.
+
+**Entradas** (prellenadas desde la última estimación o desde Google): reseñas, nota, años; ticket medio (vacío = tabla por nivel de precios de Google); mesas, personas por mesa, servicios (desayuno, comida, cena), rotaciones, días por semana, ocupación observada y concurrencia en la visita; facturación anual declarada con su fuente; si usa apps de reparto.
+
+**Cálculo** (`core/estimation.py`, puro y con pruebas):
+
+- Reseñas: clientes/año = (reseñas / años) / tasa_reseña; ×ticket, ÷12. La tasa central (2 %) da la cifra media; la alta (4 %) la baja y la baja (1 %) la alta.
+- Aforo: mesas × personas × rotaciones × servicios × días × ocupación × ticket por semana, ×52/12, ±20 %. Sin ocupación anotada se usa la de la concurrencia observada (baja 30 %, media 55 %, alta 80 %).
+- Facturación declarada: manda sobre los dos métodos (±10 %) y la confianza es alta. Con los dos métodos, media de ambos y el rango más amplio; confianza media si uno no llega al doble del otro, baja si no. Con uno solo, baja.
+- Banda por facturación mensual media (pequeño < 15.000 €, mediano < 60.000 €, grande), presupuesto sugerido dentro del rango (pequeño = mínimo, mediano = centro redondeado a 100 €, grande = máximo; 1.000–3.000 € por defecto).
+- Argumento para el cliente: «La web se paga con N clientes nuevos al mes durante X meses» con ticket × margen bruto (30 %); con reparto, también cuántos pedidos directos al mes la amortizan con la comisión (30 %).
+
+Todas las hipótesis están en `EstimationSettings` (`/admin/`, una fila). Cada estimación guarda sus entradas, el resultado, la explicación línea a línea y una copia de las hipótesis usadas, así que el histórico se puede reproducir aunque cambien los ajustes.
+
+Resultado: **829 pruebas superadas** + prueba de navegador de la tarjeta (`393-admin-estimacion*.png`).
+
+## 14. Conector MCP para Claude
+
+**Servicio.** `mcp` en `compose.yaml`: misma imagen, `uvicorn core.mcp_server:app`, misma base de datos y volumen privado. Transporte HTTP streamable en `https://app.nndrei.dev/mcp` con el SDK oficial (`mcp==2.0.0`, fijado como en Diario). Va aparte porque la web sigue en Gunicorn (WSGI) y el SDK es ASGI; así un fallo de uno no tumba al otro.
+
+**Autenticación, como Diario.** Claude.ai solo conecta por OAuth, así que el servicio es su propio servidor de autorización (OAuth 2.1 con registro dinámico de clientes y PKCE, del SDK). Diferencia con Diario: `/authorize` no pide una contraseña compartida, sino que manda a `/conectar-claude/` en la web. Allí se aplican el login normal, la verificación en dos pasos y los límites de intentos. Solo un administrador puede pulsar «Permitir», y la conexión queda ligada a él. Access token de 1 hora, refresh de 30 días con rotación, revocación RFC 7009. Todo en PostgreSQL (`McpClient`, `McpAuthRequest`, `McpCode`, `McpToken`) y códigos y tokens solo como SHA-256. Cada llamada comprueba que la persona sigue activa y es administradora: si se le quita el rol, pierde el acceso al momento. En **Más → Seguridad → Conexiones con Claude** se ven las conexiones activas y se cortan.
+
+**Herramientas** (lógica en `core/mcp_tools.py`, probada sin el protocolo; descripciones en español en `core/mcp_server.py`): `buscar_clientes(texto?, estado?)`, `get_cliente(id)`, `crear_cliente(nombre, direccion, place_id?)` (idempotente por `place_id`; si ese sitio está en «Buscar clientes», lo enlaza y trae horario y ubicación), `guardar_estudio(cliente_id, campos, fuentes?)`, `guardar_fuentes(cliente_id, urls)`, `subir_demo(cliente_id, nombre_archivo, html)` y `guardar_estimacion(cliente_id, datos)`. Se validan tipos, campos conocidos, longitudes (texto ≤ 5000 o el máximo del campo), URLs http/https (≤ 50 por llamada, ≤ 100 por estudio) y HTML UTF-8 ≤ 5 MB. Cada escritura deja una entrada interna «Claude: …» en el historial (`mcp_*`; la estimación, «Nueva estimación de facturación. (Claude)»).
+
+**Borrador IA.** El estudio gana `ai_draft`, `ai_updated_at`, `ai_sources`, `validated_by` y `validated_at`. Lo que entra por MCP queda como «Borrador IA», con fecha y fuentes. En la ficha, la etiqueta y «Validar estudio» (admin y desarrollador). Una escritura posterior de Claude lo vuelve a dejar como borrador.
+
+**Webs de muestra versionadas.** Cada subida (web o MCP) es una `DemoVersion` en `demos/<pk>/v<n>.html`; la última es la pública en `/demos/<slug>/`. El slug es fijo por negocio: nombre + 6 caracteres aleatorios (`bar-pepe-7k3mzp`), para que no se pueda adivinar. Se sirve sin sesión, con `Content-Security-Policy: sandbox …` (origen opaco: no lee cookies ni nada de la app), `noindex`, `no-store` y `no-referrer`. La dirección antigua `/clientes/<uuid>/demo-cliente/` redirige (301) a la nueva. La demo única de antes pasa a ser la versión 1 en la siguiente subida. En la ficha se ven la versión, las anteriores y el QR (`/clientes/<uuid>/demo/qr.png`, PNG descargable).
+
+**Caddy.** Añadir a `app.nndrei.dev` en `~/stacks/webs/_proxy/Caddyfile`, en lugar del `reverse_proxy` actual:
+
+```caddyfile
+	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/* /authorize /token /register /revoke
+	handle @mcp {
+		reverse_proxy nndrei-app-mcp:8000
+	}
+	handle {
+		reverse_proxy nndrei-app-web:8000
+	}
+```
+
+`SITE_URL` debe ser exactamente `https://app.nndrei.dev` (sin barra final): es el `issuer` de OAuth y Claude.ai lo compara literalmente. En Claude: Configuración → Conectores → Añadir conector personalizado → `https://app.nndrei.dev/mcp`.
+
+Comprobado: 19 pruebas (herramientas una a una y el flujo entero de Claude.ai con registro, autorización, consentimiento, token, `initialize`, `tools/list`, `tools/call`, error de validación, rotación del refresh y desconexión) y arranque real con Uvicorn: metadatos OAuth con `issuer` `https://app.nndrei.dev` y `/mcp` sin token → 401 con `resource_metadata`.
+
+Resultado: **876 pruebas superadas** + 6 de navegador; `makemigrations --check` y `manage.py check` sin incidencias.
+
+## 15. Embudo v2: «Propuesta», «Demo lista» y estimación en Seguimiento
+
+**Fases.** 01 Encontrado, 02 Estudiado, 03 Demo lista, 04 Visitado, 05 Propuesta (↻, se repite), 06 Aprobado, 07 En construcción, 08 Revisión final, 09 Web publicada; «Descartado» sigue fuera del embudo. «Propuesta enviada» y «Cambios en la propuesta» se funden en «Propuesta» (clave `proposal`; `review` desaparece). «Demo lista» (`demo_ready`, color melocotón `--peach`) significa estudio y demo hechos, solo falta visitar.
+
+Transiciones: Estudiado → Demo lista o directamente Visitado (visitar no exige demo); Demo lista → Visitado; «He ido» sigue llevando a Visitado desde cualquier fase anterior. Pedir cambios en una propuesta ya no mueve de fase: el negocio sigue en «Propuesta» hasta que se acepta (→ Aprobado). Se puede descartar desde Encontrado, Estudiado, Demo lista, Visitado y Propuesta.
+
+**Migración `0022`.** Quien esté en `review` pasa a `proposal`; quien esté en Estudiado y ya tenga demo (una `DemoVersion` o el archivo único de antes) pasa a «Demo lista». Estos movimientos no se anotan en el historial de fases porque una migración no tiene a nadie que los firme. El historial es inmutable, así que las filas antiguas conservan «Cambios en la propuesta» (`LEGACY_STAGE_LABELS`).
+
+**MCP.** `subir_demo` pasa a «Demo lista» un negocio en Encontrado o Estudiado (con su `StageChange` y entrada en el historial), nunca hacia atrás, y devuelve la fase. `buscar_clientes` lista las fases nuevas y acepta «Propuesta enviada» y «Cambios en la propuesta» como «Propuesta». Subir una demo desde la web no mueve de fase (el encargo lo pedía en la herramienta MCP).
+
+**Seguimiento.** Sin el panel «Próximas acciones»: la tabla ocupa todo el ancho. Columnas: Negocio, Fase, Siguiente paso, Estimación de facturación («11.706 €/mes»), Presupuesto sugerido («1.000 €»), Actualizado; sin estimación, «—» en gris. La última estimación se lee con dos subconsultas en la misma consulta de la lista (el número de consultas no crece con las filas). Importes a la derecha con cifras tabulares; la tabla hace scroll horizontal dentro de su tarjeta. «✓ Hecha» pasa del panel a la celda «Siguiente paso», para que una acción vencida se pueda cerrar. En el móvil, cada tarjeta añade la línea de la estimación.
+
+Resultado: **899 pruebas superadas** + 6 de navegador; `makemigrations --check` y `manage.py check` sin incidencias.
+
+## 16. Ciudades, barrios y zonas activas
+
+**Modelo.** `City` (municipio del INE: código, nombre, provincia, comunidad; centro, caja y contorno de OpenStreetMap la primera vez que se usa), `Neighbourhood` (barrio con contorno GeoJSON o, como mínimo, caja) y `SearchArea` (ciudad entera o ciudad + barrio que se ha buscado; `active` = la recorre «Actualizar»). `Business` y `PlaceSnapshot` guardan ciudad y barrio. Sin PostGIS: los contornos van en columnas JSON y la geometría (punto en polígono, cajas, rejilla, UTM→WGS84) está en `core/geo.py`, pura y con pruebas.
+
+**Fuentes y licencias.**
+
+- Municipios: INE, «Relación de municipios y sus códigos por provincias» (`diccionario26.xlsx`), 8.132 municipios. Reutilización libre citando al INE. No trae coordenadas: se piden a Nominatim la primera vez que se usa una ciudad y se guardan.
+- Barrios y distritos de Madrid: Ayuntamiento de Madrid, geoportal (`LIMITES_ADMINISTRATIVOS/Barrios/Barrios.zip`), 131 barrios. Datos abiertos, reutilización libre citando la fuente. Viene en ETRS89 / UTM 30N y se convierte a latitud/longitud al cargarlo.
+- Resto de barrios, contornos de municipios y direcciones: OpenStreetMap (Nominatim y Overpass). © OpenStreetMap contributors, **ODbL: requiere atribución**, que se muestra en el selector de barrio y al pie de «Buscar clientes». Se piden bajo demanda, con User-Agent de la app (`GEO_USER_AGENT`, sin datos personales), como mucho una petición por segundo entre todos los procesos (`ExternalCall`) y siempre en caché: una ciudad o sus barrios no se vuelven a pedir.
+- Barrios de OSM: se usa el nivel más fino completo (admin_level 10, si no 9, si no áreas `place=suburb/neighbourhood/quarter`). Los que solo son un punto se descartan: un punto no dice a qué lado de la calle empieza el barrio. Sin barrios, se busca en la ciudad entera.
+
+**Datos existentes.** La migración `0023` crea Madrid, asigna ciudad = Madrid a todos los negocios y resultados y renombra `zone` a `legacy_zone` («zona antigua», solo trazabilidad; no aparece en filtros). Ningún otro campo cambia. La `0024` retira la zona fija: su tabla queda como `LegacySearchZone` y desaparecen el radio y la distancia. Lo que necesita red va en `manage.py setup_geography` (se puede repetir): carga municipios y barrios de Madrid, asigna barrio por coordenadas (geocodificando una sola vez la dirección de quien no las tenga) y convierte cada zona antigua activa en zona activa del barrio oficial que contiene su centro, sin forzar los nombres antiguos.
+
+**Búsqueda.** Sin «Radio (m)». El área es el contorno del barrio, o el del municipio. Se divide en celdas de ~`PLACES_CELL_KM` km que tocan el contorno; cada celda va en `locationRestriction.rectangle` y después se descarta lo que cae fuera del contorno real. Cada búsqueda gasta como mucho `PLACES_SEARCH_BUDGET` llamadas. Si se corta, la combinación zona × sector recuerda la celda siguiente (`SearchSlice.next_cell`) y la próxima búsqueda sigue desde ahí. Antes de buscar, el panel de la zona dice entre cuántas llamadas costará y, por encima de `PLACES_CONFIRM_ABOVE`, pide confirmación (también en el servidor).
+
+**Pantalla.** Filtros Ciudad (autocompletado entre los 8.000+ municipios, con la provincia entre paréntesis) | Barrio («Toda la ciudad» primero) | Categoría | Presencia digital | Estado. Se recuerdan la última ciudad y el último barrio (sesión). Los contadores siguen al área elegida. Panel de la zona con «Buscar en esta zona» y «Añadir a zonas activas»; lista «Zonas activas» con Activar/Desactivar (desactivar no borra nada).
+
+**MCP.** `buscar_clientes(texto?, estado?, ciudad?, barrio?)`: ciudad y barrio por nombre sin mayúsculas ni tildes; `texto` busca en nombre, dirección y zona antigua. `crear_cliente` asigna ciudad y barrio (del resultado de búsqueda con ese `place_id`, o de la dirección). `buscar_clientes` y `get_cliente` devuelven ciudad, provincia y barrio.
+
+**Prueba manual fuera de Madrid** (base temporal, datos reales, ninguna llamada a Google): INE cargado en 1,7 s y segunda carga sin cambios; Valladolid: contorno MultiPolygon y 39 barrios de OSM en 2,3 s, segunda apertura desde caché; toda la ciudad son 152 celdas (una categoría: tope de 60 llamadas por búsqueda, con continuación); un barrio, 1 celda (1 a 3 llamadas). Lagueruela (Teruel, municipio pequeño): contorno del municipio, 0 barrios: se busca en el municipio entero (23 celdas).
+
+Resultado: **971 pruebas superadas** + 7 de navegador (nueva: ciudad y barrio en el móvil; capturas `393-admin-buscar-filtros.png` y `393-admin-buscar-zona.png`).
+
+## 17. Códigos de tarjeta para las demos
+
+**Flujo.** En la tarjeta va escrito a mano un código de 5 caracteres. `nndrei.dev/qr` tiene un campo que solo limpia lo escrito (quita espacios, pasa a mayúsculas) y navega a `app.nndrei.dev/c/<código>`; `nndrei.dev/qr?c=XXXXX` redirige allí directamente (nginx si es alfanumérico; si no, el script de la página). La web estática no consulta nada: solo el CRM sabe qué códigos existen.
+
+**Códigos** (`core/demo_codes.py`). Alfabeto sin 0, O, 1, I ni L (31 caracteres, ~28,6 millones de combinaciones). `Business.demo_code`, único, en mayúsculas; se genera al subir la primera demo (web o MCP) y se puede regenerar desde la ficha (solo admin; el anterior deja de funcionar). La migración `0027` da código a los negocios que ya tenían demo, también a las de antes de las versiones. Se compara ignorando mayúsculas y espacios.
+
+**Canje** (`/c/<código>`). Código correcto, negocio no descartado y con demo → `DemoOpen(via='code')` y 302 a `/demos/<slug>/` (las URLs de demo no cambian). Cualquier otro caso (formato malo, inexistente, descartado, sin demo) → la misma página neutra, 404, byte a byte idéntica. Límite: 10 intentos por IP y hora, correctos o no; después, 429 con un mensaje genérico de espera. Cada intento queda en `CodeAttempt`: fecha, código normalizado, válido/no, si lo cortó el límite, HMAC-SHA256 de la IP con `SECRET_KEY` y user agent. La vista `/codigos/` (admin, enlace «Códigos» en el menú) enseña los fallidos recientes.
+
+**IP real.** Detrás de Caddy, `REMOTE_ADDR` es el proxy. Con `TRUST_X_FORWARDED_FOR=True` se usa la última entrada de `X-Forwarded-For`, que Caddy sobrescribe con la IP del cliente. Actívalo solo si el puerto de la app no es accesible más que a través de Caddy (así es en `compose.yaml`).
+
+**Aperturas.** `/demos/<slug>/` registra `DemoOpen(via='direct')` salvo que la visita venga de `/c/` (cookie de 2 minutos limitada a esa ruta), sea un HEAD o la haga alguien del equipo con sesión. Cada apertura mueve «Última actividad» en Clientes (`GREATEST` del historial y de las aperturas) y deja una línea interna en el historial, como mucho una por hora. La ficha muestra «Demo abierta N veces · última hace X» separando código y URL directa.
+
+**Descartados y buscadores.** Un negocio descartado responde 404 en `/demos/<slug>/` y en la dirección antigua, igual que una demo inexistente. Las demos llevan `X-Robots-Tag: noindex, nofollow` y un `<meta name="robots">` que se inserta al servirlas (el archivo guardado no cambia). Toda la app lleva la misma cabecera (`NoIndexMiddleware`). `robots.txt` no enumera rutas ni sitemap y deja rastrear: así un buscador que encuentre un enlace filtrado lee el noindex en vez de indexar la URL a ciegas. `/demos/` sigue en 404.

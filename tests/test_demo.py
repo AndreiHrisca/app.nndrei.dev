@@ -2,7 +2,7 @@
 import uuid
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from core.demos import has_demo, save_demo
+from core.demos import has_demo, save_demo, with_noindex
 from core.models import ActivityEvent, Business
 
 pytestmark = pytest.mark.django_db
@@ -11,6 +11,12 @@ DEMO = b'<!doctype html><html><head><style>h1{color:red}</style></head><body><h1
 
 
 def demo_url(business):
+    """The public address: /demos/<slug>/ (fixed per business once it has had a demo)."""
+    business.refresh_from_db(fields=['demo_slug'])
+    return f'/demos/{business.demo_slug}/'
+
+
+def old_url(business):
     return f'/clientes/{business.public_id}/demo-cliente'
 
 
@@ -21,10 +27,10 @@ def upload(client, business, content=DEMO, name='demo.html'):
 def test_demo_is_public_and_served_as_is(client, businesses):
     own = businesses[0]
     save_demo(own, DEMO)
-    for url in (demo_url(own), demo_url(own) + '/'):
+    for url in (demo_url(own), demo_url(own).rstrip('/')):
         response = client.get(url)
         assert response.status_code == 200
-        assert response.content == DEMO
+        assert response.content == with_noindex(DEMO)
         assert response['Content-Type'] == 'text/html; charset=utf-8'
         assert response['Content-Security-Policy'] == 'sandbox allow-scripts allow-popups allow-forms'
         assert response['X-Robots-Tag'] == 'noindex, nofollow'
@@ -35,10 +41,55 @@ def test_demo_is_public_and_served_as_is(client, businesses):
 
 def test_missing_business_and_missing_demo_look_the_same(client, businesses):
     own = businesses[0]
+    save_demo(own, DEMO)
+    from core.demos import delete_demo
+    delete_demo(own)
     without_demo = client.get(demo_url(own))
-    unknown = client.get(f'/clientes/{uuid.uuid4()}/demo-cliente')
+    unknown = client.get('/demos/no-existe-abc123/')
     assert without_demo.status_code == unknown.status_code == 404
     assert without_demo.content == unknown.content
+    assert client.get(old_url(own)).status_code == client.get(f'/clientes/{uuid.uuid4()}/demo-cliente').status_code == 404
+
+
+def test_old_address_redirects_to_the_fixed_one(client, businesses, settings):
+    own = businesses[0]
+    save_demo(own, DEMO)
+    response = client.get(old_url(own))
+    assert response.status_code == 301 and response['Location'] == settings.SITE_URL + demo_url(own)
+
+
+def test_slug_is_fixed_unguessable_and_versions_pile_up(sign_in, businesses):
+    own = businesses[0]
+    first = save_demo(own, DEMO)
+    slug = own.demo_slug
+    assert slug.startswith('mi-negocio-') and len(slug) == len('mi-negocio-') + 6
+    second = save_demo(own, b'<html>v2</html>', 'nueva.html')
+    own.refresh_from_db()
+    assert own.demo_slug == slug and (first.number, second.number) == (1, 2)
+    assert sign_in('admin').get(demo_url(own)).content == with_noindex(b'<html>v2</html>')
+
+
+def test_single_file_from_before_versions_becomes_version_one(businesses):
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import default_storage
+    from core.demos import legacy_path, read_demo
+    own = businesses[0]
+    default_storage.save(legacy_path(own), ContentFile(DEMO))
+    assert has_demo(own) and read_demo(own) == DEMO
+    save_demo(own, b'<html>v2</html>')
+    versions = list(own.demoversion_set.order_by('number').values_list('number', 'size'))
+    assert versions == [(1, len(DEMO)), (2, 15)] and not default_storage.exists(legacy_path(own))
+
+
+def test_qr_png_of_the_public_address(sign_in, businesses):
+    own = businesses[0]
+    c = sign_in('admin')
+    assert c.get(f'/clientes/{own.public_id}/demo/qr.png').status_code == 404
+    save_demo(own, DEMO)
+    response = c.get(f'/clientes/{own.public_id}/demo/qr.png?descargar=1')
+    assert response['Content-Type'] == 'image/png' and response.content.startswith(b'\x89PNG')
+    assert f'qr-{own.demo_slug}.png' in response['Content-Disposition']
+    assert sign_in('client').get(f'/clientes/{own.public_id}/demo/qr.png').status_code == 404
 
 
 @pytest.mark.parametrize('bad', ['1', 'not-a-uuid', '66413817-e885-4ebc-888a-34f261e1506', '../../etc/passwd'])
@@ -68,18 +119,18 @@ def test_admin_uploads_replaces_and_deletes(sign_in, businesses, settings):
     stage = own.stage
     client = sign_in('admin')
     page = client.get(own.get_absolute_url()).content.decode()
-    assert 'Subir demo' in page and 'Demo disponible' not in page
+    assert 'Subir web de muestra' in page and 'Web de muestra disponible' not in page
     assert 'Aún no hay una web publicada.' in page
 
     assert upload(client, own).status_code == 302
-    assert client.get(demo_url(own)).content == DEMO
+    assert client.get(demo_url(own)).content == with_noindex(DEMO)
     page = client.get(own.get_absolute_url()).content.decode()
-    assert 'Demo disponible' in page and 'Copiar enlace' in page and 'Eliminar demo' in page
-    assert f'{settings.SITE_URL}/clientes/{own.public_id}/demo-cliente' in page
+    assert 'Web de muestra disponible' in page and 'Copiar enlace' in page and 'Eliminar web de muestra' in page
+    assert settings.SITE_URL + demo_url(own) in page and 'Descargar QR' in page
     assert 'Aún no hay una web publicada.' in page
 
     assert upload(client, own, b'<html><body>v2</body></html>').status_code == 302
-    assert client.get(demo_url(own)).content == b'<html><body>v2</body></html>'
+    assert client.get(demo_url(own)).content == with_noindex(b'<html><body>v2</body></html>')
 
     assert client.post(f'/clientes/{own.public_id}/demo/eliminar/').status_code == 302
     assert not has_demo(own)
@@ -119,18 +170,18 @@ def test_developer_sees_the_link_but_no_controls(sign_in, businesses):
     own = businesses[0]
     save_demo(own, DEMO)
     page = sign_in('developer').get(own.get_absolute_url()).content.decode()
-    assert 'Abrir demo' in page and 'Copiar enlace' in page
-    assert 'Eliminar demo' not in page and 'Reemplazar' not in page
+    assert 'Abrir web de muestra' in page and 'Copiar enlace' in page
+    assert 'Eliminar web de muestra' not in page and 'Reemplazar' not in page
 
 
 def test_demo_link_in_client_view(sign_in, businesses, client):
     own = businesses[0]
     save_demo(own, DEMO)
     preview = sign_in('admin').get(f'/clientes/{own.public_id}/portal/').content.decode()
-    assert 'Abrir demo' in preview and 'Subir demo' not in preview and 'Eliminar demo' not in preview
+    assert 'Abrir web de muestra' in preview and 'Subir web de muestra' not in preview and 'Eliminar web de muestra' not in preview
     client.logout()
     portal = sign_in('client').get(f'/portal/negocio/{own.public_id}/').content.decode()
-    assert 'Abrir demo' in portal and 'Eliminar demo' not in portal
+    assert 'Abrir web de muestra' in portal and 'Eliminar web de muestra' not in portal
 
 
 def test_session_cookies_are_out_of_scripts_reach(client, accounts):

@@ -1,0 +1,1 @@
+{% for c in cities %}<button type="button" role="option" class="city-option" data-city-option="{{ c.pk }}" data-city-label="{{ c.name }} ({{ c.province }})">{{ c.name }} <small>({{ c.province }})</small></button>{% empty %}{% if query %}<p class="muted city-empty">Ningún municipio con «{{ query }}».</p>{% endif %}{% endfor %}

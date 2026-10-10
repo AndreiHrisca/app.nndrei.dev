@@ -1,4 +1,4 @@
-"""Estudio previo: internal groundwork, and the gate into "Ficha creada"."""
+"""Estudio previo: internal groundwork, and the gate into "Estudiado"."""
 import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor

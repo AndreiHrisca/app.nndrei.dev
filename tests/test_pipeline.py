@@ -1,6 +1,6 @@
 import pytest
 from django.core.exceptions import ValidationError
-from core.models import SearchZone,SearchCategory,PlaceSnapshot,PlacesUsage,StageChange
+from core.models import SearchCategory,PlaceSnapshot,PlacesUsage,StageChange
 from core.services import transition_business
 from core.places import opportunity_score,store_place,reserve_call,search_body
 pytestmark=pytest.mark.django_db
@@ -17,17 +17,18 @@ def test_transitions(accounts,businesses):
     transition_business(accounts['admin'],b.public_id,'discarded','Cerrado')
     assert StageChange.objects.count()==2
 
-def test_dedup_and_circle(settings):
-    z=SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
+def test_dedup_and_outline(settings,area):
     c=SearchCategory.objects.create(name='Bares')
+    shape,barrios=(area.neighbourhood.geometry,area.neighbourhood.bbox),[area.neighbourhood]
     p={'id':'place','displayName':{'text':'Bar'},'location':{'latitude':40.4,'longitude':-3.7},'businessStatus':'OPERATIONAL'}
-    store_place(p,z,c)
+    store_place(p,area,c,shape,barrios)
     item=PlaceSnapshot.objects.get(); item.status='discarded'; item.notes='Keep'; item.save()
-    p['displayName']['text']='Nuevo nombre'; store_place(p,z,c)
+    assert item.city==area.city and item.neighbourhood==area.neighbourhood
+    p['displayName']['text']='Nuevo nombre'; store_place(p,area,c,shape,barrios)
     item.refresh_from_db(); assert item.status=='discarded' and item.notes=='Keep' and item.name=='Nuevo nombre'
-    p['id']='far'; p['location']['latitude']=41; store_place(p,z,c)
+    p['id']='far'; p['location']['latitude']=41; store_place(p,area,c,shape,barrios)
     assert PlaceSnapshot.objects.count()==1
-    assert 'rectangle' in search_body(z,c)['locationRestriction']
+    assert 'rectangle' in search_body([40.39,-3.71,40.41,-3.69],c)['locationRestriction']
     settings.PLACES_MONTHLY_LIMIT=1
     assert reserve_call() and not reserve_call()
 
@@ -40,12 +41,11 @@ def test_pipeline_permissions(sign_in,businesses,role):
     if role!='admin':
         assert client.post('/buscar/actualizar/',HTTP_HX_REQUEST='true').status_code==404
 
-def test_refresh_pagination_and_field_mask(settings):
+def test_refresh_pagination_and_field_mask(settings,area):
     from unittest.mock import patch,Mock
     from core.places import refresh_places,FIELD_MASK
     from core.models import SearchRun
     settings.GOOGLE_PLACES_API_KEY='test-key'
-    SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
     SearchCategory.objects.create(name='Bares',included_type='bar')
     responses=[]
     for i in range(3):
@@ -60,11 +60,10 @@ def test_refresh_pagination_and_field_mask(settings):
     assert post.call_args.kwargs['json']['pageToken']=='page-2'
     assert PlacesUsage.objects.get().requests==3
 
-def test_closed_place_is_not_kept_operational():
-    z=SearchZone.objects.create(name='Madrid',latitude=40.4,longitude=-3.7)
+def test_closed_place_is_not_kept_operational(area):
     c=SearchCategory.objects.create(name='Bar')
-    PlaceSnapshot.objects.create(place_id='closed',name='Bar',zone=z,category=c,status='discarded')
-    store_place({'id':'closed','businessStatus':'CLOSED_PERMANENTLY'},z,c)
+    PlaceSnapshot.objects.create(place_id='closed',name='Bar',category=c,status='discarded')
+    store_place({'id':'closed','businessStatus':'CLOSED_PERMANENTLY'},area,c,(area.neighbourhood.geometry,area.neighbourhood.bbox),[])
     item=PlaceSnapshot.objects.get()
     assert item.business_status=='CLOSED_PERMANENTLY' and item.status=='discarded'
 
@@ -72,25 +71,25 @@ def test_stage_row_is_an_ordered_list_with_decorative_arrows(sign_in,businesses)
     body=sign_in('admin').get('/').content.decode()
     row=body[body.index('<ol class="stages">'):body.index('</ol>')+5]
     assert row.count('<li class="stage-step">')==9
-    # Eight arrows for nine steps: none after Producción, and all of them decorative.
+    # Eight arrows for nine steps: none after Web publicada, and all of them decorative.
     assert row.count('stage-arrow')==8
     assert row.count('aria-hidden="true"')==8
     assert 'stage-arrow' not in row[row.rindex('<li class="stage-step">'):]
     assert 'stroke-dasharray' in row and '↻' in row
 
-NEW_ORDER=['Encontrado','Ficha creada','Visitado','Propuesta','Revisión','Presupuesto aprobado','Desarrollo','Pruebas','Producción','Descartado']
+NEW_ORDER=['Encontrado','Estudiado','Demo lista','Visitado','Propuesta','Aprobado','En construcción','Revisión final','Web publicada','Descartado']
 
 def test_stage_order_is_defined_once():
     from core.models import STAGES,STAGE_ORDER
     assert [label for _,label in STAGES]==NEW_ORDER
-    assert STAGE_ORDER['profile_created']<STAGE_ORDER['visited']<STAGE_ORDER['proposal']
+    assert STAGE_ORDER['profile_created']<STAGE_ORDER['demo_ready']<STAGE_ORDER['visited']<STAGE_ORDER['proposal']
+    assert 'review' not in STAGE_ORDER
 
 def test_pipeline_tiles_follow_the_new_order(sign_in,businesses):
     import re
     row=sign_in('admin').get('/').content.decode()
     row=row[row.index('<ol class="stages">'):row.index('</ol>')]
-    # The tile shortens 'Presupuesto aprobado' to 'Aprobado'; the order is what matters.
-    assert re.findall(r'<b>([^<]*)</b>',row)==['Aprobado' if x=='Presupuesto aprobado' else x for x in NEW_ORDER[:9]]
+    assert re.findall(r'<b>([^<]*)</b>',row)==NEW_ORDER[:9]
     assert re.findall(r'<span class="stage-number">(\d+)</span>',row)==[f'{i:02d}' for i in range(1,10)]
 
 def test_selects_follow_the_new_order(sign_in,businesses):
@@ -102,8 +101,12 @@ def test_selects_follow_the_new_order(sign_in,businesses):
 def test_transitions_follow_the_new_order():
     from core.services import STAGE_TRANSITIONS
     assert STAGE_TRANSITIONS['found']=={'profile_created','discarded'}
-    assert STAGE_TRANSITIONS['profile_created']=={'visited','discarded'}
+    # A visit does not need a demo first.
+    assert STAGE_TRANSITIONS['profile_created']=={'demo_ready','visited','discarded'}
+    assert STAGE_TRANSITIONS['demo_ready']=={'visited','discarded'}
     assert STAGE_TRANSITIONS['visited']=={'proposal','discarded'}
+    # «Propuesta» repeats and ends with the client's acceptance, not a manual move.
+    assert STAGE_TRANSITIONS['proposal']=={'discarded'}
 
 def test_visit_now_follows_the_study(sign_in,accounts,businesses):
     from datetime import datetime
@@ -119,3 +122,14 @@ def test_clients_table_sorts_by_pipeline_order_not_alphabet(sign_in,businesses):
     body=sign_in('admin').get('/clientes/',{'sort':'fase'}).content.decode()
     # Alphabetically 'found' > 'production'; by pipeline order it comes first.
     assert body.index(other.name)<body.index(own.name)
+
+
+def test_visible_wording_comes_from_labels(client, django_user_model):
+    """Texts are renamed in core.labels; stored values stay the same."""
+    from core import labels
+    from core.models import STAGES, ROLES, REQUEST_STATES
+    assert dict(STAGES)['production'] == 'Web publicada' and dict(STAGES)['profile_created'] == 'Estudiado'
+    assert dict(ROLES)['developer'] == 'Desarrollador'
+    assert dict(REQUEST_STATES)['production'] == 'Publicada'
+    assert labels.stage_activity('proposal') == 'Fase: Propuesta'
+    assert labels.in_progress_count(3) == '3 en marcha'

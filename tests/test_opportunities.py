@@ -1,16 +1,15 @@
 """Captar / Descartar in "Buscar clientes"."""
 import pytest
 from core import labels
-from core.models import ActivityEvent, Business, PlaceSnapshot, SearchCategory, SearchZone
+from core.models import ActivityEvent, Business, PlaceSnapshot, SearchCategory
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
 def opportunities(db):
-    zone = SearchZone.objects.create(name='Villaverde', latitude=40.4, longitude=-3.7)
     category = SearchCategory.objects.create(name='Bares', color='yellow')
-    return [PlaceSnapshot.objects.create(place_id=f'place-{i}', name=f'Bar {i}', zone=zone, category=category, rating=4.7, reviews=1960, photos=8, has_website=False, phone='600 123 456') for i in range(3)]
+    return [PlaceSnapshot.objects.create(place_id=f'place-{i}', name=f'Bar {i}', category=category, rating=4.7, reviews=1960, photos=8, has_website=False, phone='600 123 456') for i in range(3)]
 
 
 def counter(body, label):
@@ -23,7 +22,7 @@ def counter(body, label):
 def test_capture_creates_the_business_and_updates_counters(sign_in, opportunities):
     client = sign_in('admin')
     body = client.get('/buscar/').content.decode()
-    assert counter(body, 'En pipeline') == 0 and counter(body, 'Sin web') == 3
+    assert counter(body, 'En seguimiento') == 0 and counter(body, 'Sin web') == 3
     assert labels.CAPTURE in body and 'Al pipeline' not in body
 
     target = opportunities[0]
@@ -38,10 +37,10 @@ def test_capture_creates_the_business_and_updates_counters(sign_in, opportunitie
     assert ActivityEvent.objects.filter(business=business, text=labels.CAPTURE_ACTIVITY).exists()
 
     # The swapped row shows the new state and a way back to the card...
-    assert 'En pipeline' in fragment and business.get_absolute_url() in fragment and 'Ver ficha' in fragment
+    assert 'En seguimiento' in fragment and business.get_absolute_url() in fragment and 'Ver ficha' in fragment
     # ...and the counters come back out of band.
     assert 'hx-swap-oob="true"' in fragment
-    assert counter(fragment, 'En pipeline') == 1
+    assert counter(fragment, 'En seguimiento') == 1
 
 
 def test_discard_updates_state_and_counters(sign_in, opportunities):
@@ -53,7 +52,7 @@ def test_discard_updates_state_and_counters(sign_in, opportunities):
     target.refresh_from_db()
     assert target.status == 'discarded' and target.notes == 'Ya tiene proveedor'
     assert counter(fragment, 'Descartados') == 1
-    assert counter(fragment, 'En pipeline') == 0
+    assert counter(fragment, 'En seguimiento') == 0
     assert not Business.objects.filter(name='Bar 1').exists()
 
 
